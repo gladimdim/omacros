@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "gladimdim.omacros",
+  "name": "Omacros",
+  "version": "1.0.0",
+  "author": "Dmytro Gladkyi",
+  "license": "MIT",
+  "description": "Text macros for Omarchy. Record a key combo and the phrase it should insert, manage them all from one panel, and fire them from the bar, a Hyprland binding or the command line.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omacros",
+    "description": "Phrase macros: record a key combo and the text it inserts",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "aliases": [
+      "omacros",
+      "macros",
+      "phrases",
+      "snippets",
+      "text-expander",
+      "shortcut",
+      "shortcuts",
+      "type-text"
+    ]
+  }
+}

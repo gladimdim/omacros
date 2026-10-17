@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# omacros — command line for the gladimdim.omacros plugin.
+#
+# Commands:
+#   omacros list              List saved macros (id, keys, phrase)
+#   omacros show <id>         Print one macro as JSON
+#   omacros keys <id>         Print the recorded combo, e.g. "SUPER + F3"
+#   omacros paste <id>        Type the phrase with wtype (no shell IPC)
+#   omacros bind <id>         Print the o.bind line for ~/.config/hypr/bindings.lua
+#   omacros path              Print the state file path
+
+set -euo pipefail
+
+STATE_HOME="${XDG_STATE_HOME:-${HOME}/.local/state}"
+STATE_DIR="${STATE_HOME}/omarchy"
+STATE_FILE="${STATE_DIR}/omacros.json"
+PLUGIN_ID="gladimdim.omacros"
+FIRE_METHOD="fire"
+
+usage() {
+  cat <<'USAGE'
+omacros — saved phrase macros for Omarchy
+
+Commands:
+  list              List saved macros (id, keys, phrase)
+  show <id>         Print one macro as JSON
+  keys <id>         Print the recorded combo, e.g. "SUPER + F3"
+  paste <id>        Type the phrase with wtype (no shell IPC)
+  bind <id>         Print the o.bind line for ~/.config/hypr/bindings.lua
+  path              Print the state file path
+USAGE
+  exit 0
+}
+
+fail() {
+  echo "omacros: $1" >&2
+  exit 1
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  -h|--help|help|"") usage ;;
+esac
+
+id_arg="${2:-}"
+case "$cmd" in
+  list|path) ;;
+  show|keys|paste|bind)
+    [[ -n "$id_arg" ]] || fail "missing macro id — run: omacros list"
+    [[ "$id_arg" =~ ^[A-Za-z0-9._-]+$ ]] || fail "invalid macro id: $id_arg"
+    ;;
+  *) usage ;;
+esac
+
+[[ -n "$STATE_FILE" && -f "$STATE_FILE" ]] || fail "no macros saved yet ($STATE_DIR/omacros.json)"
+
+jq_get() {
+  # Reads one field of one macro from the state file.
+  python3 - "$STATE_FILE" "$id_arg" "$1" <<'PY'
+import json, sys
+path, macro_id, field = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path, encoding="utf-8") as fh:
+    state = json.load(fh)
+macros = state.get("macros", []) if isinstance(state, dict) else []
+for macro in macros:
+    if isinstance(macro, dict) and macro.get("id") == macro_id:
+        value = macro.get(field, "")
+        print(value if isinstance(value, str) else json.dumps(value))
+        break
+else:
+    sys.stderr.write("omacros: no macro with id " + macro_id + "\n")
+    sys.exit(2)
+PY
+}
+
+case "$cmd" in
+  path)
+    echo "$STATE_DIR/omacros.json"
+    ;;
+  list)
+    python3 - "$STATE_FILE" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as fh:
+    state = json.load(fh)
+macros = state.get("macros", []) if isinstance(state, dict) else []
+if not macros:
+    print("no macros")
+    sys.exit(0)
+for macro in macros:
+    if isinstance(macro, dict):
+        print("\t".join([
+            str(macro.get("id", "")),
+            str(macro.get("keys", "")),
+            str(macro.get("text", "")),
+        ]))
+PY
+    ;;
+  show)
+    python3 - "$STATE_FILE" "$id_arg" <<'PY'
+import json, sys
+path, macro_id = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as fh:
+    state = json.load(fh)
+macros = state.get("macros", []) if isinstance(state, dict) else []
+for macro in macros:
+    if isinstance(macro, dict) and macro.get("id") == macro_id:
+        print(json.dumps(macro, indent=2), end="\n")
+        break
+else:
+    sys.stderr.write("omacros: no macro with id " + macro_id + "\n")
+    sys.exit(2)
+PY
+    ;;
+  keys)
+    keys="$(jq_get keys)"
+    [[ -n "$keys" ]] || fail "no macro with id $id_arg"
+    echo "$keys"
+    ;;
+  bind)
+    keys="$(jq_get keys)"
+    [[ -n "$keys" ]] || fail "no macro with id $id_arg"
+    label="$(jq_get label | sed 's/\\/\\\\/g; s/"/\\"/g')"
+    title="${label:+Omacros: $label}"
+    [[ -n "$title" ]] || title="Omacros"
+    echo "o.bind(\"${keys}\", \"${title}\", \"omarchy-shell ${PLUGIN_ID} ${FIRE_METHOD} ${id_arg}\")"
+    ;;
+  paste)
+    phrase="$(jq_get text)"
+    [[ -n "$phrase" ]] || fail "no macro with id $id_arg"
+    exec timeout 15 wtype "$phrase"
+    ;;
+esac
