@@ -63,11 +63,13 @@ BarWidget {
     onFileChanged: reload()
   }
 
+  // The window manages its own visibility (starts closed; open() shows it).
+  // No visible:false wrapper here: it would cascade over a child Item
+  // (QsWindow) and pin the window closed forever.
   Loader {
     id: listLoader
     active: true
     source: Qt.resolvedUrl("MacrosWindow.qml")
-    visible: false
     onLoaded: {
       root.injectList()
       Qt.callLater(root.injectList)

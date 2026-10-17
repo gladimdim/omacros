@@ -1,17 +1,18 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Omacros.js" as Omacros
 
-// Macro manager in a detached, resizable window: a real toplevel, not a bar
-// popup, so it keeps its size (default 60% of screen) however its content
-// changes and can be moved and resized like any window. Service.qml asks
-// Hyprland to float, center and pin it via a runtime window rule.
-Window {
+// Macro manager in a detached, resizable window: a real toplevel
+// (Quickshell FloatingWindow), not a bar popup, so it keeps its size
+// (default 60% of screen) however its content changes and can be moved and
+// resized like any window. Service.qml asks Hyprland to float, center and
+// pin it via a runtime window rule.
+FloatingWindow {
   id: root
-  moduleName: "gladimdim.omacros"
 
   property var bar: null
   property var settings: null
@@ -27,11 +28,13 @@ Window {
   readonly property color separator: Util.alpha(contentForeground, 0.14)
 
   readonly property bool opened: root.visible
-  readonly property int defaultWidth: Math.round(root.defaultScreenW * 0.6)
-  readonly property int defaultHeight: Math.round(root.defaultScreenH * 0.6)
-  property int defaultScreenW: 1920
-  property int defaultScreenH: 1080
-  property bool sizedOnce: false
+  // First-open size: 60% of the target screen. Binding implicit size lets the
+  // window map at that size; once the user (or a rule) resizes it, the width /
+  // height pair is written explicitly and this binding stops driving it, so a
+  // user's own size wins for the rest of the session.
+  implicitWidth: Math.round((root.screen ? root.screen.width : 1920) * 0.6)
+  implicitHeight: Math.round((root.screen ? root.screen.height : 1080) * 0.6)
+  minimumSize: Qt.size(640, 420)
 
   property var macros: []
   property string rawText: ""
@@ -44,8 +47,6 @@ Window {
   property bool statusIsError: false
   property string pendingFireId: ""
 
-  minimumWidth: 640
-  minimumHeight: 420
   title: "Omacros"
   color: root.surface
   visible: false
@@ -67,20 +68,10 @@ Window {
     IpcRegistry.call(Omacros.ipcTarget, Omacros.applyRulesMethod, [])
   }
 
-  // Size comes from the screen on first open only; after that the user's
-  // own resize wins for the rest of the session.
-  function rememberScreen() {
-    defaultScreenW = root.screen ? root.screen.width : 1920
-    defaultScreenH = root.screen ? root.screen.height : 1080
-  }
-
+  // Size comes from the screen binding; opening just activates + focuses so
+  // keyboard control lands in the list right away.
   function welcomed() {
-    if (!root.sizedOnce) {
-      root.width = root.defaultWidth
-      root.height = root.defaultHeight
-      root.sizedOnce = true
-    }
-    root.requestActivate()
+    root.contentItem.forceActiveFocus()
     list.forceActiveFocus()
     reload()
   }
@@ -88,10 +79,7 @@ Window {
   Timer {
     id: showDelay
     interval: 150
-    onTriggered: {
-      root.rememberScreen()
-      root.visible = true
-    }
+    onTriggered: root.visible = true
   }
 
   function reload() {
@@ -618,7 +606,7 @@ Window {
         maximumFlickVelocity: 1500
         currentIndex: 0
 
-        ScrollIndicator.vertical: ScrollIndicator {}
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
         delegate: Rectangle {
           required property var modelData
