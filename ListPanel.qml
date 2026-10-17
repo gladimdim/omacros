@@ -279,7 +279,7 @@ Panel {
   function fieldEscape(event) {
     if (event.key !== Qt.Key_Escape) return
     if (root.recording) root.cancelRecording()
-    root.keyCatcher.forceActiveFocus()
+    keyCatcher.forceActiveFocus()
     event.accepted = true
   }
 
@@ -476,7 +476,7 @@ Panel {
           }
 
           Button {
-            visible: root.comboKeys !== "" || root.phraseField.text !== ""
+            visible: root.comboKeys !== "" || phraseField.text !== ""
             text: "Clear"
             foreground: root.contentMuted
             accent: Color.accent
@@ -586,7 +586,7 @@ Panel {
               Text {
                 textFormat: Text.PlainText
                 anchors.centerIn: parent
-                text: "␡"
+                text: "✕"
                 color: root.contentMuted
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.body

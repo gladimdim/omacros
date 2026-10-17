@@ -24,13 +24,10 @@ Item {
   property bool writing: false
   property var macros: []
 
-  signal macrosChanged()
-
   function applyRaw(text) {
     rawText = String(text || "")
     var state = Omacros.parseState(rawText)
     macros = state.macros
-    macrosChanged()
   }
 
   function persist(state) {
