@@ -17,7 +17,6 @@ BarWidget {
   readonly property string path: Omacros.statePath(home, stateHome)
   readonly property bool opened: (listLoader.item && listLoader.item.opened === true)
   readonly property string statusTooltip: Omacros.tooltipFor(macros)
-
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -67,7 +66,7 @@ BarWidget {
   Loader {
     id: listLoader
     active: true
-    source: Qt.resolvedUrl("ListPanel.qml")
+    source: Qt.resolvedUrl("MacrosWindow.qml")
     visible: false
     onLoaded: {
       root.injectList()
@@ -87,6 +86,9 @@ BarWidget {
       else root.openList()
     }
   }
+
+  // Runtime-bind notes for the window copy: the service wires saved combos
+  // automatically, so the form points at behavior instead of a paste step.
 
   Rectangle {
     visible: root.countReady && root.macros.length > 0

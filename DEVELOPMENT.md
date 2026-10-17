@@ -6,12 +6,17 @@ Text-macro plugin for Omarchy. Not yet listed on the marketplace — new, unveri
 
 - kinds: `service` + `bar-widget`, `keepLoaded: true`. The service owns IPC
   (`omarchy-shell gladimdim.omacros fire <id>`) and the `wtype` Process; the
-  bar widget owns the panel. Both watch `~/.local/state/omarchy/omacros.json`.
-- Firing: Hyprland binding (generated `o.bind(...)` line) → omarchy-shell IPC →
-  service → `timeout 15 wtype <phrase>`. The CLI `paste` path bypasses the
-  shell and runs wtype directly.
-- Recording only captures a combo (modifiers + one key); persistent bindings
-  are the user's one-line paste into `~/.config/hypr/bindings.lua`.
+  bar widget owns the icon and the detached `MacrosWindow.qml`. Both watch
+  `~/.local/state/omarchy/omacros.json`.
+- Firing: runtime keybind → omarchy-shell IPC → service →
+  `timeout 15 wtype <phrase>`. The CLI `paste` path bypasses the shell and
+  runs wtype directly.
+- Recording captures a combo (modifiers + one key); the service binds it
+  over hyprctl eval (`hl.bind`) — runtime state, no config files — and
+  re-applies it after every Hyprland reload.
+- The window opener asks Hyprland to float/center/pin the window with a
+  runtime `hl.window_rule` line via IPC `applyRules` and re-applies it
+  before every open.
 
 ## Checks
 

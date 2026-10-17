@@ -2,30 +2,36 @@
 
 # Omacros (`gladimdim.omacros`)
 
-Text macros (saved phrases) for [Omarchy](https://omarchy.org/). Click the keyboard icon in the bar, record a key combo, type the text it should insert, save — done. Phrases fire from the bar panel, a Hyprland keybinding, or the command line, and the text is typed into whatever window is focused.
+Text macros (saved phrases) for [Omarchy](https://omarchy.org/). Open the manager from the bar, record a key combo, type the text it should insert, save — done. The combo wires itself up at runtime, so pressing it anywhere types your text into whatever window has focus. Phrases also fire from the command line, no binding needed.
 
 ![Omacros preview](preview.png)
 
 ## How it works
 
-1. **Record the combo.** Click **Record keys** in the panel, then press the combination you want — hold modifiers first, then the key (e.g. hold `SUPER`, tap `F3`). `Esc` cancels.
+1. **Record the combo.** Click **Record**, then press the combination you want — hold modifiers first, then the key (e.g. hold `SUPER`, tap `F3`). `Esc` cancels.
 2. **Type the phrase.** Anything you want inserted: `SUPER DESKTOP`, an email signature, a code snippet preamble.
-3. **Save.** The panel hands you a ready-made `o.bind(...)` line for Hyprland. Paste it into `~/.config/hypr/bindings.lua`, save, and the combo starts inserting your text everywhere.
+3. **Save.** That's it. Omacros registers the combo with the running Hyprland right away — no config files touched. After every Hyprland reload the service re-applies your combos automatically, so they keep working.
 
-One line per macro, exactly as the panel shows it:
+Under the hood the binding is runtime state: the service asks Hyprland via its Lua API
 
 ```lua
-o.bind("SUPER + F3", "Omacros: Greet", "omarchy-shell gladimdim.omacros fire <id>")
+hl.bind("SUPER + F3", hl.dsp.exec_cmd("omarchy-shell gladimdim.omacros fire <id>"), { description = "Omacros: Greet" })
 ```
 
-The binding calls the plugin's IPC handler in the running shell, which types the phrase with `wtype` (Wayland virtual keyboard). No process spawning per keypress beyond one small `wtype` run.
+The bind calls the plugin's IPC handler in the running shell, which types the phrase with `wtype` (Wayland virtual keyboard). Nothing is written to `~/.config/hypr`, nothing runs elevated, and combos already bound by you or another plugin are never overridden — Omacros notifies you and asks for a different combo instead.
 
-Phrases without a keybinding still work: left-click a row in the panel to insert it now, or run `omacros paste <id>`.
+Prefer a permanent binding in your own config? Run `omacros bind <id>` and paste the printed `o.bind(...)` line into `~/.config/hypr/bindings.lua`.
 
-## The panel
+Phrases without a keybinding still work: press `Enter` on a selected row in the manager, or run `omacros paste <id>`.
 
-- Left-click the 󰌌 icon in the bar (center section by default): create, run or delete macros.
-- Right-click a row's ␡ to delete; click a row to insert its phrase right away (the panel closes and the text is typed a moment later).
+## The manager window
+
+Left-click the 󰌌 icon in the bar (center section by default) to open it — a detached, resizable window, not a popup pinned to the bar:
+
+- Left column: name, combo recorder, phrase, **Save macro**.
+- Below: every saved macro as a table. Click a row to select it, double-click to insert its phrase right now.
+- Keyboard: `↑ ↓` select  ·  `Enter` insert  ·  `Del` remove  ·  `Esc` close or cancel recording.
+- To insert, the window closes first so the text types into the app you were working in.
 - Tooltips on the bar icon summarize your saved combos.
 
 ## Command line
@@ -34,7 +40,7 @@ Phrases without a keybinding still work: left-click a row in the panel to insert
 omacros list              # every saved macro: id, keys, phrase
 omacros keys <id>         # the recorded combo
 omacros paste <id>        # insert now (types with wtype)
-omacros bind <id>         # print the o.bind line for ~/.config/hypr/bindings.lua
+omacros bind <id>         # print a permanent o.bind line for bindings.lua (optional)
 omacros path              # state file path
 ```
 
@@ -63,21 +69,21 @@ State lives at `~/.local/state/omarchy/omacros.json` (plain JSON — up to 50 ma
 ## Notes & limits
 
 - **wtype required** (installed by default on Omarchy). If typing silently fails, check `wtype` runs in your session.
-- Keybind wiring is the one manual step: Omarchy's shell can register global shortcuts it ships at startup, but arbitrary user combos must go through your `bindings.lua` — the plugin generates the exact line, the paste is yours.
-- Recorded keys cover letters, digits, `F1`-`F12`, punctuation and navigation keys, with `SUPER`/`CTRL`/`ALT`/`SHIFT` modifiers. Combos already claimed by another binding will conflict — Hyprland keeps them; use a different combo.
+- Runtime binds are compositor state: Hyprland rebuilds them from your config on every reload, so the service re-registers your combos after each one. Removing the plugin also removes its binds.
+- Recorded keys cover letters, digits, `F1`-`F12`, punctuation and navigation keys, with `SUPER`/`CTRL`/`ALT`/`SHIFT` modifiers. Combos already claimed by another binding are kept theirs — Omacros skips and notifies.
 - Phrases are single-line; `wtype` types them character by character, so a fired macro never corrupts your clipboard.
 
 ## Files
 
-| Path                | Role                                                     |
-|---------------------|----------------------------------------------------------|
-| `manifest.json`     | Plugin manifest (service + bar widget, keepLoaded)       |
-| `Service.qml`       | State, IPC (`fire <id>`), `wtype` typing, notifications   |
-| `BarWidget.qml`     | Bar icon + macro count badge                              |
-| `ListPanel.qml`     | The panel: create form with combo recorder + saved list   |
-| `Omacros.js`        | Shared state/sanitize/bind-line logic (and test target)   |
-| `scripts/omacros`   | CLI (`list`, `keys`, `paste`, `bind`, `path`)              |
-| `tests/`            | `node tests/test-omacros.js`                              |
+| Path                 | Role                                                        |
+|----------------------|-------------------------------------------------------------|
+| `manifest.json`      | Plugin manifest (service + bar widget, keepLoaded)          |
+| `Service.qml`        | State, runtime bind sync, IPC (`fire <id>`), `wtype` typing  |
+| `BarWidget.qml`      | Bar icon + macro count badge + opens the manager window     |
+| `MacrosWindow.qml`   | Detached manager: recorder form + saved audit list          |
+| `Omacros.js`         | Shared state/sanitize/bind-plan logic (and test target)     |
+| `scripts/omacros`    | CLI (`list`, `keys`, `paste`, `bind`, `path`)               |
+| `tests/`             | `node tests/test-omacros.js`                                |
 
 ## Development
 

@@ -2,8 +2,10 @@
 // the CLI and the tests: state parsing, sanitizing and keybind rendering.
 //
 // A macro is one saved phrase plus the key combo the user recorded for it.
-// The combo is a hint the panel hands back as a ready-to-paste o.bind line;
-// firing goes through the plugin IPC (omarchy-shell gladimdim.omacros fire <id>).
+// The combo is wired up automatically: the service registers a runtime
+// keybind with the running Hyprland through its Lua API and re-applies it
+// after every reload. Nothing is written to the user's hypr config and no
+// command runs with elevated privileges; see runtimeBindLua below.
 
 var maxMacros = 50
 var maxLabel = 48
@@ -12,6 +14,7 @@ var stateMaxBytes = 65536
 var stateFileName = "omacros.json"
 var ipcTarget = "gladimdim.omacros"
 var fireMethod = "fire"
+var applyRulesMethod = "applyRules"
 
 // Modifier order for the recorded combo, matching Omarchy's o.bind style.
 var modifierTokens = ["SUPER", "CTRL", "ALT", "SHIFT"]
@@ -115,6 +118,7 @@ function displayKeys(tokens) {
 }
 
 // Hyprland binding for a macro, ready to paste into ~/.config/hypr/bindings.lua.
+// Kept as a manual fallback for setups where the runtime wiring can't run.
 // o.bind splits on " + ", so the label must carry no unescaped quotes.
 function bindLineFor(macro) {
   if (!macro) return ""
@@ -123,6 +127,244 @@ function bindLineFor(macro) {
   var label = String(macro.label || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')
   var title = label ? "Omacros: " + label : "Omacros"
   return 'o.bind("' + keys + '", "' + title + '", "omarchy-shell ' + ipcTarget + " " + fireMethod + " " + String(macro.id || "") + '")'
+}
+
+// ---- Runtime keybind wiring -------------------------------------------------
+// The service asks the running Hyprland, over hyprctl eval, to bind recorded
+// combos with its Lua API. One macro equals one line like:
+//   hl.bind("SUPER + F2", hl.dsp.exec_cmd("omarchy-shell gladimdim.omacros fire <id>"),
+//           { description = "Omacros: SUPER DESKTOP" })
+// This is purely runtime state: no hypr config files are read or written, and
+// nothing is escalated. Hyprland forgets runtime binds on config reload, so
+// the service applies them again on every shell start and whenever it sees a
+// reload event.
+
+// Description marker lets the service recognize its own binds and never
+// touch, overwrite or unbind anything the user bound themselves.
+var bindDescPrefix = "Omacros:"
+
+// Modifier bitfield hyprctl binds -j reports (Hyprland MOD_* bits).
+var hyprMaskBits = { SUPER: 64, CTRL: 4, ALT: 8, SHIFT: 1 }
+
+function hyprMask(tokens) {
+  var clean = sanitizeTokens(tokens)
+  if (!clean) return 0
+  var mask = 0
+  for (var i = 0; i < clean.length; i++) {
+    if (isModifierToken(clean[i])) mask |= hyprMaskBits[clean[i]]
+  }
+  return mask
+}
+
+// hyprctl binds -j reports keys uppercased ("J", "F2"), so compare in that form.
+function hyprMainKey(tokens) {
+  var clean = sanitizeTokens(tokens)
+  if (!clean) return ""
+  var token = clean[clean.length - 1]
+  if (isModifierToken(token)) return ""
+  return token.toUpperCase()
+}
+
+function comboId(tokens) {
+  if (!sanitizeTokens(tokens)) return ""
+  return hyprMask(tokens) + "|" + hyprMainKey(tokens)
+}
+
+function fireCommandFor(macro) {
+  if (!macro) return ""
+  return "omarchy-shell " + ipcTarget + " " + fireMethod + " " + String(macro.id || "")
+}
+
+function luaEscape(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+}
+
+function bindTitleFor(macro) {
+  if (!macro) return ""
+  var label = String(macro.label || "")
+  return label ? bindDescPrefix + " " + label : bindDescPrefix.slice(0, -1)
+}
+
+function runtimeBindLua(macro) {
+  if (!macro) return ""
+  var keys = displayKeys(macro.tokens)
+  if (!keys) return ""
+  var cmd = fireCommandFor(macro)
+  if (!cmd) return ""
+  return 'hl.bind("' + keys + '", hl.dsp.exec_cmd("' + luaEscape(cmd) + '"), { description = "' + luaEscape(bindTitleFor(macro)) + '" })'
+}
+
+function runtimeUnbindLua(keys) {
+  var clean = displayKeys(String(keys || "").split(" + "))
+  if (!clean) return ""
+  return 'hl.unbind("' + clean + '")'
+}
+
+// evalLua takes the plan bindDiff produced and renders one hyprctl eval Lua
+// chunk: unbinds first (fresh combos get their slot cleared) then binds.
+// Returns "" when there is nothing to do.
+function evalLua(bindList, unbindList) {
+  var binds = Array.isArray(bindList) ? bindList : []
+  var unbinds = Array.isArray(unbindList) ? unbindList : []
+  var lines = []
+  for (var i = 0; i < unbinds.length; i++) {
+    var unbind = runtimeUnbindLua(unbinds[i])
+    if (unbind) lines.push(unbind)
+  }
+  for (var j = 0; j < binds.length; j++) {
+    var bind = runtimeBindLua(binds[j])
+    if (bind) lines.push(bind)
+  }
+  return lines.join("\n")
+}
+
+// hyprctl binds -j -> map of "modmask|KEY" -> { description }.
+function parseBinds(raw) {
+  var out = {}
+  if (!raw) return out
+  try {
+    var items = JSON.parse(raw)
+    if (!Array.isArray(items)) return out
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i]
+      if (!item || typeof item !== "object") continue
+      var mask = Number(item.modmask)
+      var key = String(item.key || "")
+      if (!isFinite(mask) || mask < 0 || mask > 0xFFF || !key || key.indexOf("mouse") === 0) continue
+      out[mask + "|" + key.toUpperCase()] = { description: String(item.description || "") }
+    }
+  } catch (e) {
+    return {}
+  }
+  return out
+}
+
+// The service remembers what it applied so a sync only touches what changed.
+function appliedFor(macros) {
+  var items = Array.isArray(macros) ? macros : []
+  var applied = []
+  for (var i = 0; i < items.length; i++) {
+    var macro = items[i]
+    if (!macro) continue
+    var tokens = sanitizeTokens(macro.tokens)
+    if (!tokens) continue
+    applied.push({ id: String(macro.id || ""), keys: displayKeys(tokens) })
+  }
+  return applied
+}
+
+function appliedLookup(applied) {
+  var out = {}
+  var list = Array.isArray(applied) ? applied : []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].id) out[list[i].id] = list[i]
+  }
+  return out
+}
+
+// hyprctl binds -j uppercases keys ("J", "F2"); canonical token names are
+// lowercase for letters ("j") and title-cased F-keys ("F2"). Rebuild the
+// readable combo from the mask bits and a bound key name.
+function tokensFromBound(bits, key) {
+  var out = []
+  for (var s = 0; s < modifierTokens.length; s++) {
+    if (bits & hyprMaskBits[modifierTokens[s]]) out.push(modifierTokens[s])
+  }
+  var token = String(key || "")
+  if (!token) return []
+  if (keyNames.indexOf(token) >= 0) { out.push(token); return out }
+  if (keyNames.indexOf(token.toLowerCase()) >= 0) { out.push(token.toLowerCase()); return out }
+  if (keyNames.indexOf(token.toUpperCase()) >= 0) { out.push(token.toUpperCase()); return out }
+  return [] // unknown key name: leave the bind alone
+}
+
+// Compares what the user saved, what Hyprland currently has bound, and what
+// the service last applied. Returns:
+//   bind    — macros needing a runtime bind
+//   unbind  — combo key strings to clear first (orphaned or re-bound combos)
+//   taken   — combos already bound to something that is not ours: reported,
+//             never overridden
+function bindDiff(macros, existing, applied) {
+  var diff = { bind: [], unbind: [], taken: [] }
+  var current = parseBinds("")
+  if (typeof existing === "object" && existing) current = existing
+  var lookup = appliedLookup(applied)
+
+  var desired = []
+  var desiredByCombo = {}
+  var items = Array.isArray(macros) ? macros : []
+  for (var i = 0; i < items.length; i++) {
+    var macro = items[i]
+    if (!macro) continue
+    var tokens = sanitizeTokens(macro.tokens)
+    if (!tokens) continue
+    var entry = { macro: macro, keys: displayKeys(tokens), combo: comboId(tokens) }
+    if (!entry.keys || !entry.combo) continue
+    if (desiredByCombo[entry.combo]) continue // first macro on a combo wins
+    desiredByCombo[entry.combo] = entry
+    desired.push(entry)
+  }
+
+  for (var j = 0; j < desired.length; j++) {
+    var want = desired[j]
+    var existingInfo = current[want.combo]
+    var isOurs = existingInfo && String(existingInfo.description || "").indexOf(bindDescPrefix) === 0
+    var matches = isOurs
+      && String(existingInfo.description) === bindTitleFor(want.macro)
+      && lookup[want.macro.id]
+      && lookup[want.macro.id].keys === want.keys
+    if (matches) continue
+    if (existingInfo && !isOurs) {
+      diff.taken.push({ keys: want.keys, owner: String(existingInfo.description || "") })
+      continue
+    }
+    // Re-binding an owned combo: clear the old line first so the command and
+    // title update atomically instead of layering duplicate binds.
+    if (isOurs) diff.unbind.push(want.keys)
+    diff.bind.push(want.macro)
+  }
+
+  // Deleting or re-comboing a macro leaves its old combo orphaned. Only
+  // binds Hyprland still reports as ours (description prefix) are eligible,
+  // because hl.unbind clears an entire combo: it must never touch another
+  // author's bind by mistake. The mask bits reconstruct the readable combo.
+  for (var combo2 in current) {
+    var owned = current[combo2]
+    if (String(owned.description || "").indexOf(bindDescPrefix) !== 0) continue
+    if (desiredByCombo[combo2]) continue
+    var parts = combo2.split("|")
+    var tokens2 = tokensFromBound(Number(parts[0]), parts.slice(1).join("|"))
+    var readable = displayKeys(tokens2)
+    if (readable) diff.unbind.push(readable)
+  }
+  diff.unbind = uniq(diff.unbind)
+
+  return diff
+}
+
+function uniq(list) {
+  var seen = {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var value = String(list[i] || "")
+    if (!value || seen[value]) continue
+    seen[value] = true
+    out.push(value)
+  }
+  return out
+}
+
+// Notification text when a recorded combo already belongs to another bind.
+// Omacros never overrides; it asks for a different combo instead.
+function takenNotice(taken) {
+  var entries = Array.isArray(taken) ? taken : []
+  if (entries.length === 0) return ""
+  var first = entries[0]
+  var owner = String(first.owner || "").replace(/\s+/g, " ").trim()
+  if (owner.length > 60) owner = owner.slice(0, 57) + "…"
+  var text = first.keys + " is already bound to \"" + owner + "\" — pick another combo"
+  if (entries.length > 1) text += " (" + (entries.length - 1) + " more combo" + (entries.length > 2 ? "s" : "") + " rejected)"
+  return text
 }
 
 function notifySafeText(value) {
@@ -195,6 +437,14 @@ function addMacro(raw, input, now) {
     return { ok: false, error: "Enough macros — delete one first" }
   }
 
+  // One combo can only fire one phrase, and the runtime wiring would replace
+  // the older bind's command silently; treat it as a conflict.
+  for (var i = 0; i < current.macros.length; i++) {
+    if (comboId(current.macros[i].tokens) === comboId(tokens)) {
+      return { ok: false, error: displayKeys(tokens) + " is already saved for another macro" }
+    }
+  }
+
   var label = sanitizeLabel(input && input.label)
   var macro = {
     id: newId(now),
@@ -264,8 +514,11 @@ if (typeof module !== "undefined") {
     stateFileName: stateFileName,
     ipcTarget: ipcTarget,
     fireMethod: fireMethod,
+    applyRulesMethod: applyRulesMethod,
     modifierTokens: modifierTokens,
     keyNames: keyNames,
+    bindDescPrefix: bindDescPrefix,
+    hyprMaskBits: hyprMaskBits,
     statePath: statePath,
     stateDir: stateDir,
     emptyState: emptyState,
@@ -276,6 +529,20 @@ if (typeof module !== "undefined") {
     sanitizeTokens: sanitizeTokens,
     displayKeys: displayKeys,
     bindLineFor: bindLineFor,
+    hyprMask: hyprMask,
+    hyprMainKey: hyprMainKey,
+    comboId: comboId,
+    fireCommandFor: fireCommandFor,
+    luaEscape: luaEscape,
+    bindTitleFor: bindTitleFor,
+    runtimeBindLua: runtimeBindLua,
+    runtimeUnbindLua: runtimeUnbindLua,
+    evalLua: evalLua,
+    parseBinds: parseBinds,
+    appliedFor: appliedFor,
+    appliedLookup: appliedLookup,
+    bindDiff: bindDiff,
+    takenNotice: takenNotice,
     notifySafeText: notifySafeText,
     sanitizeMacro: sanitizeMacro,
     parseState: parseState,

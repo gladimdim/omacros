@@ -1,11 +1,13 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 import qs.Commons
 import "Omacros.js" as Omacros
 
-// Long-lived plugin service: owns the state file and types saved phrases
-// on request. Firing happens over IPC — a Hyprland keybind runs
+// Long-lived plugin service: owns the state file, syncs saved combos as
+// runtime keybinds and types saved phrases on request. Firing happens over
+// IPC — a Hyprland keybind runs
 // `omarchy-shell gladimdim.omacros fire <id>`, which lands here — so the
 // phrase types into whatever window has focus at that moment.
 Item {
@@ -24,10 +26,17 @@ Item {
   property bool writing: false
   property var macros: []
 
+  // Runtime bind state: what the service last successfully registered, so
+  // syncs stay small, plus what it last warned about, so a stuck conflict
+  // doesn't spam notifications.
+  property var appliedBinds: []
+  property string lastConflictNotice: ""
+
   function applyRaw(text) {
     rawText = String(text || "")
     var state = Omacros.parseState(rawText)
     macros = state.macros
+    bindSync.restart()
   }
 
   function persist(state) {
@@ -58,12 +67,96 @@ Item {
     ])
   }
 
-  Component.onCompleted: ensureDir.running = true
+  Component.onCompleted: {
+    ensureDir.running = true
+    syncBinds(true)
+  }
+
+  // ---- Runtime keybind sync ------------------------------------------------
+  // The plugin registers each saved combo with the running Hyprland through
+  // its Lua API (hl.bind / hl.unbind via hyprctl eval). Runtime binds live in
+  // compositor state, not in any config file, so nothing in ~/.config/hypr is
+  // read or written and nothing runs as root. Hyprland drops them on config
+  // reload; the service re-applies on shell start, on every saved change and
+  // whenever Hyprland reports a reload. Combos already bound to something
+  // else are skipped and reported — another bind is never overridden.
+  property var plannedChunk: ""
+
+  function syncBinds(force) {
+    if (!ready && !force) return
+    if (bindQuery.running) { queuedSync.restart(); return }
+    bindQuery.command = ["timeout", "5", "hyprctl", "binds", "-j"]
+    bindQuery.running = true
+  }
+
+  function planBinds(raw) {
+    var blocked = !ready
+    var plan = Omacros.bindDiff(root.macros, Omacros.parseBinds(raw), root.appliedBinds)
+    var notice = Omacros.takenNotice(plan.taken)
+    if (notice !== "" && notice !== lastConflictNotice) {
+      lastConflictNotice = notice
+      notify("Omacros", notice)
+    } else if (notice === "" && lastConflictNotice !== "") {
+      lastConflictNotice = ""
+    }
+    if (blocked) return // still loading state; nothing to compare reliably yet
+
+    var chunk = Omacros.evalLua(plan.bind, plan.unbind)
+    if (chunk === "") {
+      return
+    }
+    plannedChunk = chunk
+    bindEval.command = ["timeout", "5", "hyprctl", "eval", chunk]
+    bindEval.running = true
+  }
 
   Process {
     id: ensureDir
     command: ["timeout", "5", "mkdir", "-p", root.dir]
     onExited: store.reload()
+  }
+
+  Process {
+    id: bindQuery
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.planBinds(String(text || ""))
+    }
+  }
+
+  Process {
+    id: bindEval
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        // Cache as applied so the next sync is a no-op until something changes.
+        root.appliedBinds = Omacros.appliedFor(root.macros)
+      }
+      // A failed eval is picked up again by the next state change or reload.
+      plannedChunk = ""
+    }
+  }
+
+  Timer {
+    id: bindSync
+    interval: 250
+    onTriggered: root.syncBinds(false)
+  }
+
+  Timer {
+    id: queuedSync
+    interval: 400
+    onTriggered: root.syncBinds(false)
+  }
+
+  // Hyprland forgets runtime binds whenever its config reloads; re-register.
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (String(event && event.name ? event.name : "") === "configreloaded") {
+        root.appliedBinds = []
+        root.syncBinds(false)
+      }
+    }
   }
 
   Process {
@@ -123,5 +216,18 @@ Item {
     function list(): string {
       return Omacros.listFor(root.macros)
     }
+
+    // The detached window lives in the same process, but asking Hyprland for
+    // it floats/centers the window fresh each open in case a reload dropped
+    // the rule since the shell started.
+    function applyRules(): void {
+      ruleProc.command = ["timeout", "5", "hyprctl", "eval",
+        'hl.window_rule({ match = { title = "^Omacros$" }, float = true, center = true })']
+      ruleProc.running = true
+    }
+  }
+
+  Process {
+    id: ruleProc
   }
 }

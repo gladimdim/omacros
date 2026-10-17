@@ -226,6 +226,119 @@ test("listFor renders the CLI table", function() {
   eq(out, "1\ta\tone")
 })
 
+// ---------------------------------------------------------------- runtime binds
+
+test("hyprMask/hyprMainKey/comboId map tokens to hyprctl fields", function() {
+  eq(Om.hyprMask(["SUPER", "F2"]), 64)
+  eq(Om.hyprMask(["CTRL", "ALT", "SHIFT", "j"]), 4 | 8 | 1)
+  eq(Om.hyprMask(null), 0)
+  eq(Om.hyprMainKey(["SUPER", "F2"]), "F2")
+  eq(Om.hyprMainKey(["SUPER", "j"]), "J")
+  eq(Om.hyprMainKey(["SUPER"]), "")
+  eq(Om.comboId(["SUPER", "F2"]), "64|F2")
+  eq(Om.comboId(["junk", "garbage"]), "")
+})
+
+test("runtimeBindLua renders one eval line per macro", function() {
+  eq(Om.runtimeBindLua({
+    id: "abc-1",
+    label: 'Said "hi" \\ now',
+    tokens: ["SUPER", "F2"]
+  }), 'hl.bind("SUPER + F2", hl.dsp.exec_cmd("omarchy-shell gladimdim.omacros fire abc-1"), { description = "Omacros: Said \\"hi\\" \\\\ now" })')
+  eq(Om.runtimeBindLua({ id: "x", label: "", tokens: ["CTRL", "j"] }),
+    'hl.bind("CTRL + j", hl.dsp.exec_cmd("omarchy-shell gladimdim.omacros fire x"), { description = "Omacros" })')
+  eq(Om.runtimeBindLua(null), "")
+  eq(Om.runtimeBindLua({ id: "x", tokens: ["SUPER"] }), "")
+})
+
+test("runtimeUnbindLua renders hl.unbind for readable combos", function() {
+  eq(Om.runtimeUnbindLua("SUPER + F2"), 'hl.unbind("SUPER + F2")')
+  eq(Om.runtimeUnbindLua(""), "")
+})
+
+test("evalLua orders unbinds before binds and skips empties", function() {
+  var macro = { id: "abc-1", label: "", tokens: ["SUPER", "F2"], keys: "SUPER + F2" }
+  eq(Om.evalLua([], []), "")
+  eq(Om.evalLua([macro], ["SUPER + F3"]),
+    'hl.unbind("SUPER + F3")\n' +
+    'hl.bind("SUPER + F2", hl.dsp.exec_cmd("omarchy-shell gladimdim.omacros fire abc-1"), { description = "Omacros" })')
+})
+
+test("parseBinds keeps modmask|KEY with descriptions", function() {
+  var binds = Om.parseBinds(JSON.stringify([
+    { modmask: 64, key: "F2", description: "screenshot" },
+    { modmask: 64, key: "J", description: "Omacros: x" },
+    { modmask: 64, key: "mouse:272", description: "click" }
+  ]))
+  eq(Object.keys(binds).length, 2)
+  eq(binds["64|F2"].description, "screenshot")
+  eq(binds["64|J"].description, "Omacros: x")
+  eq(Object.keys(Om.parseBinds("not json")).length, 0)
+  eq(Object.keys(Om.parseBinds("")).length, 0)
+})
+
+test("bindDiff binds fresh combos and skips already-applied ones", function() {
+  var macro = { id: "abc-1", label: "Thing", tokens: ["SUPER", "F2"], keys: "SUPER + F2" }
+  var plan = Om.bindDiff([macro], Om.parseBinds(""), Om.appliedFor([]))
+  eq(plan.bind.length, 1)
+  eq(plan.unbind.length, 0)
+  eq(plan.taken.length, 0)
+
+  var appliedPlan = Om.bindDiff([macro], { "64|F2": { description: "Omacros: Thing" } }, Om.appliedFor([macro]))
+  eq(appliedPlan.bind.length, 0)
+  eq(appliedPlan.unbind.length, 0)
+})
+
+test("bindDiff refuses combos owned by other binds", function() {
+  var macro = { id: "abc-1", label: "Thing", tokens: ["SUPER", "F2"], keys: "SUPER + F2" }
+  var plan = Om.bindDiff([macro], { "64|F2": { description: "screenshot tool" } }, Om.appliedFor([]))
+  eq(plan.bind.length, 0)
+  eq(plan.taken.length, 1)
+  eq(plan.taken[0].keys, "SUPER + F2")
+  eq(plan.taken[0].owner, "screenshot tool")
+  eq(Om.takenNotice(plan.taken), 'SUPER + F2 is already bound to "screenshot tool" — pick another combo')
+})
+
+test("takenNotice keeps the text short and single", function() {
+  eq(Om.takenNotice([]), "")
+  var many = Om.takenNotice([
+    { keys: "SUPER + F2", owner: "x" },
+    { keys: "SUPER + F3", owner: "y" },
+    { keys: "SUPER + F4", owner: "z" }
+  ])
+  eq(many, 'SUPER + F2 is already bound to "x" — pick another combo (2 more combos rejected)')
+})
+
+test("bindDiff rebinds when the applied command id changed", function() {
+  var macro = { id: "new-id", label: "Thing", tokens: ["SUPER", "F2"], keys: "SUPER + F2" }
+  var plan = Om.bindDiff([macro], { "64|F2": { description: "Omacros: Thing" } }, [{ id: "old-id", keys: "SUPER + F2" }])
+  eq(plan.bind.length, 1)
+  eq(plan.bind[0].id, "new-id")
+  eq(plan.unbind.length, 1)
+  eq(plan.unbind[0], "SUPER + F2")
+})
+
+test("bindDiff unbinds only combos Omacros owns when a macro is deleted", function() {
+  var plan = Om.bindDiff([], {
+    "64|F2": { description: "Omacros: gone" },
+    "64|F3": { description: "user macro from bindings.lua" }
+  }, Om.appliedFor([]))
+  eq(plan.unbind.length, 1)
+  eq(plan.unbind[0], "SUPER + F2")
+  eq(plan.bind.length, 0)
+})
+
+test("addMacro refuses a second macro on the same combo", function() {
+  var raw = Om.encode(Om.parseState(""))
+  var first = Om.addMacro(raw, { tokens: ["SUPER", "F2"], text: "one" })
+  eq(first.ok, true)
+  var dup = Om.addMacro(first.state, { tokens: ["SUPER", "F2"], text: "two" })
+  eq(dup.ok, false)
+  eq(dup.error, "SUPER + F2 is already saved for another macro")
+  var variant = Om.addMacro(first.state, { tokens: ["CTRL", "F2"], text: "two" })
+  eq(variant.ok, true)
+})
+
 // ---------------------------------------------------------------- done
 
 console.log("")
