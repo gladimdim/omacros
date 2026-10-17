@@ -1,4 +1,4 @@
-# Omacros (`gladimdim.omacros`)
+# Omacros (`gladimdim.omacros`) — developer notes
 
 Text-macro plugin for Omarchy. Not yet listed on the marketplace — new, unverified.
 
@@ -19,7 +19,7 @@ Text-macro plugin for Omarchy. Not yet listed on the marketplace — new, unveri
 node tests/test-omacros.js
 omakit verify . --json
 omakit inspect . --json
-omakit submit . --category Productivity --tags macros,text,typing --json --offline
+omakit submit . --category Productivity --tags Bar,Quickshell --json --offline
 ```
 
 ## Review notes (for the eventual submission)
@@ -30,4 +30,4 @@ omakit submit . --category Productivity --tags macros,text,typing --json --offli
 - No network, no curl. One write surface: the plugin's own state file under
   `~/.local/state/omarchy/`, via `FileView` atomic writes.
 - All user text renders with `textFormat: Text.PlainText`.
-- Phrases start with a dash are rejected (`wtype` has no `--` separator).
+- Phrases starting with a dash are rejected (`wtype` has no `--` separator).
