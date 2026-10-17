@@ -29,9 +29,9 @@ Phrases without a keybinding still work: press `Enter` on a selected row in the 
 Left-click the 󰌌 icon in the bar (center section by default) to open it — a detached, resizable window, not a popup pinned to the bar:
 
 - Left column: name, combo recorder, phrase, **Save macro**.
-- Below: every saved macro as a table. Click a row to select it, double-click to insert its phrase right now.
+- Below: every saved macro as a table. **Click a row to edit it** — its combo, name and text fill the form, Save turns into **Update macro**, and the combo re-wires itself when you change it. Clear/Cancel edit returns the form to new-macro mode.
+- To insert without editing: double-click a row (or press Enter on a selected one) — the window closes and the phrase is pasted into whatever app you were working in.
 - Keyboard: `↑ ↓` select  ·  `Enter` insert  ·  `Del` remove  ·  `Esc` close or cancel recording.
-- To insert, the window closes first so the paste lands in the app you were working in.
 - Tooltips on the bar icon summarize your saved combos.
 
 ## Command line

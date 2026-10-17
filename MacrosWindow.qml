@@ -43,6 +43,8 @@ FloatingWindow {
   property string heldMods: ""
   property var comboTokens: []
   property string comboKeys: ""
+  // When set, the form is editing this macro id instead of creating one.
+  property string editingId: ""
   property string statusText: ""
   property bool statusIsError: false
   property string pendingFireId: ""
@@ -106,11 +108,26 @@ FloatingWindow {
   }
 
   function clearForm() {
+    editingId = ""
     comboTokens = []
     comboKeys = ""
     heldMods = ""
     labelField.text = ""
     phraseField.text = ""
+  }
+
+  // Clicking a saved row loads it into the form: combo, label and phrase
+  // become editable, Save turns into Update. The list selection follows.
+  function populateFrom(macro) {
+    if (!macro) return
+    if (recording) cancelRecording()
+    editingId = macro.id
+    comboTokens = macro.tokens || []
+    comboKeys = String(macro.keys || "")
+    labelField.text = String(macro.label || "")
+    phraseField.text = String(macro.text || "")
+    selectMacro(macro.id)
+    setStatus("Editing " + (comboKeys || "macro") + " — change the values and press Update, or Clear to start a new macro", false)
   }
 
   function startRecording() {
@@ -138,11 +155,20 @@ FloatingWindow {
 
   function save() {
     if (recording) cancelRecording()
-    var result = Omacros.addMacro(rawText, {
+    var input = {
       label: labelField.text,
       tokens: comboTokens,
       text: phraseField.text
-    })
+    }
+    if (editingId !== "") {
+      var updated = Omacros.updateMacro(rawText, editingId, input)
+      if (!updated.ok) { setStatus(updated.error, true); return }
+      persist(updated.state)
+      populateFrom(updated.macro)
+      setStatus("Updated. " + updated.macro.keys + " fires the new text everywhere — the combo re-wires itself automatically.", false)
+      return
+    }
+    var result = Omacros.addMacro(rawText, input)
     if (!result.ok) { setStatus(result.error, true); return }
     persist(result.state)
     clearForm()
@@ -154,7 +180,8 @@ FloatingWindow {
     var result = Omacros.removeMacro(rawText, id)
     if (!result.ok) return
     persist(result.state)
-    setStatus("Deleted", false)
+    if (editingId === id) { clearForm(); setStatus("Deleted the macro you were editing — form cleared", false) }
+    else setStatus("Deleted", false)
   }
 
   function selectedMacro() {
@@ -417,7 +444,7 @@ FloatingWindow {
 
           Text {
             textFormat: Text.PlainText
-            text: "New macro"
+            text: root.editingId !== "" ? "Editing macro" : "New macro"
             color: root.contentForeground
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
@@ -507,7 +534,7 @@ FloatingWindow {
             spacing: Style.space(8)
 
             Button {
-              text: "Save macro"
+              text: root.editingId !== "" ? "Update macro" : "Save macro"
               foreground: root.contentForeground
               accent: Color.accent
               fontFamily: root.contentFontFamily
@@ -515,8 +542,8 @@ FloatingWindow {
             }
 
             Button {
-              visible: root.comboKeys !== "" || phraseField.text !== "" || labelField.text !== ""
-              text: "Clear"
+              visible: root.editingId !== "" || root.comboKeys !== "" || phraseField.text !== "" || labelField.text !== ""
+              text: root.editingId !== "" ? "Cancel edit" : "Clear"
               foreground: root.contentMuted
               accent: Color.accent
               fontFamily: root.contentFontFamily
@@ -633,7 +660,7 @@ FloatingWindow {
           MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
-            onClicked: { list.currentIndex = index; list.forceActiveFocus() }
+            onClicked: { root.populateFrom(modelData); list.forceActiveFocus() }
             onDoubleClicked: root.runSelected()
           }
 
@@ -740,7 +767,7 @@ FloatingWindow {
       Text {
         width: parent.width
         textFormat: Text.PlainText
-        text: "↑ ↓ select  ·  Enter insert  ·  Del remove  ·  Esc close/cancel  ·  super drag to move"
+        text: "click a row to edit · double-click inserts · ↑ ↓ select · Enter insert · Del remove · Esc close/cancel"
         color: root.contentMuted
         font.family: root.contentFontFamily
         font.pixelSize: Style.font.caption

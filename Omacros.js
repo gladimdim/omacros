@@ -463,8 +463,7 @@ function findMacro(macros, id) {
 }
 
 // input: { keys?, tokens?, label, text } — tokens win over keys.
-function addMacro(raw, input, now) {
-  now = now || new Date()
+function addMacro(raw, input, now) {  now = now || new Date()
   var phrase = sanitizePhrase(input && input.text)
   if (!phrase) return { ok: false, error: "Type the text this macro should insert" }
   // wtype has no end-of-options marker; a phrase starting with "-" would be
@@ -497,6 +496,43 @@ function addMacro(raw, input, now) {
     createdAt: now.getTime()
   }
   current.macros.push(macro)
+  return { ok: true, state: current, macro: macro }
+}
+
+// input: { tokens, label, text } — updates an existing macro in place.
+// The id and createdAt survive; every other field is re-sanitized so an
+// edited macro is exactly as constrained as a fresh one. Combos stay
+// unique across macros: the conflict check skips the macro being edited.
+function updateMacro(raw, id, input) {
+  var wanted = sanitizeId(id)
+  if (!wanted) return { ok: false, error: "No macro is being edited" }
+
+  var phrase = sanitizePhrase(input && input.text)
+  if (!phrase) return { ok: false, error: "Type the text this macro should insert" }
+  if (phrase.charAt(0) === "-") return { ok: false, error: "Phrases can't start with a dash" }
+
+  var tokens = sanitizeTokens(input && input.tokens)
+  if (!tokens) return { ok: false, error: "Record a key combo first" }
+
+  var current = parseState(raw)
+  var found = -1
+  for (var i = 0; i < current.macros.length; i++) {
+    if (current.macros[i].id === wanted) { found = i; break }
+  }
+  if (found === -1) return { ok: false, error: "That macro was deleted — reload the list" }
+
+  for (var j = 0; j < current.macros.length; j++) {
+    if (j === found) continue
+    if (comboId(current.macros[j].tokens) === comboId(tokens)) {
+      return { ok: false, error: displayKeys(tokens) + " is already saved for another macro" }
+    }
+  }
+
+  var macro = current.macros[found]
+  macro.label = sanitizeLabel(input && input.label)
+  macro.tokens = tokens
+  macro.keys = displayKeys(tokens)
+  macro.text = phrase
   return { ok: true, state: current, macro: macro }
 }
 
@@ -592,6 +628,7 @@ if (typeof module !== "undefined") {
     parseState: parseState,
     findMacro: findMacro,
     addMacro: addMacro,
+    updateMacro: updateMacro,
     removeMacro: removeMacro,
     encode: encode,
     tooltipFor: tooltipFor,

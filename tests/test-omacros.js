@@ -364,6 +364,68 @@ test("pasteEvalLua mirrors the universal paste chord", function() {
   ok(lua.indexOf("{ timeout = 50") !== -1)
 })
 
+test("updateMacro edits an existing macro in place", function() {
+  var raw = Om.encode(Om.parseState(""))
+  var added = Om.addMacro(raw, { tokens: ["SUPER", "F2"], label: "Greet", text: "ZOPA" })
+  eq(added.ok, true)
+  var macro = added.macro
+
+  var updated = Om.updateMacro(added.state, macro.id, {
+    tokens: ["CTRL", "F3"],
+    label: "Renamed",
+    text: "New text here"
+  })
+  eq(updated.ok, true)
+  eq(updated.macro.id, macro.id, "id survives edits")
+  eq(updated.macro.createdAt, macro.createdAt, "createdAt survives edits")
+  eq(updated.macro.keys, "CTRL + F3")
+  eq(updated.macro.label, "Renamed")
+  eq(updated.macro.text, "New text here")
+  // Round-trips: the state file carries the edit and parseState agrees.
+  var reloaded = Om.parseState(Om.encode(updated.state)).macros
+  eq(reloaded.length, 1)
+  eq(reloaded[0].keys, "CTRL + F3")
+  eq(reloaded[0].text, "New text here")
+})
+
+test("updateMacro keeps a macro's own combo and rejects others' combos", function() {
+  var raw = Om.encode(Om.parseState(""))
+  var first = Om.addMacro(raw, { tokens: ["SUPER", "F2"], text: "one" })
+  var second = Om.addMacro(first.state, { tokens: ["CTRL", "F2"], text: "two" })
+
+  // Re-saving the same combo for the same macro is not a conflict.
+  var keep = Om.updateMacro(second.state, first.macro.id, { tokens: ["SUPER", "F2"], text: "one" })
+  eq(keep.ok, true)
+
+  // Taking another macro's combo is.
+  var steal = Om.updateMacro(second.state, first.macro.id, { tokens: ["CTRL", "F2"], text: "one" })
+  eq(steal.ok, false)
+  eq(steal.error, "CTRL + F2 is already saved for another macro")
+})
+
+test("updateMacro re-runs every sanitize rule", function() {
+  var raw = Om.encode(Om.parseState(""))
+  var added = Om.addMacro(raw, { tokens: ["SUPER", "F2"], text: "old" })
+  var id = added.macro.id
+  var state = Om.encode(added.state)
+
+  eq(Om.updateMacro(state, id, { tokens: ["SUPER", "F2"], text: "" }).ok, false)
+  eq(Om.updateMacro(state, id, { tokens: ["SUPER", "F2"], text: "-dash" }).ok, false)
+  eq(Om.updateMacro(state, id, { tokens: ["SUPER"], text: "text" }).ok, false, "no main key")
+  eq(Om.updateMacro(state, "", { tokens: ["SUPER", "F2"], text: "text" }).ok, false, "no id")
+  eq(Om.updateMacro(state, "gone", { tokens: ["SUPER", "F2"], text: "text" }).ok, false, "unknown id")
+
+  // Labels and phrases are still clamped and cleaned.
+  var long = ""
+  for (var i = 0; i < Om.maxLabel + 12; i++) long += "x"
+  var veryLong = ""
+  for (var j = 0; j < Om.maxPhrase + 8; j++) veryLong += "y"
+  var updated = Om.updateMacro(state, id, { tokens: ["SUPER", "F2"], label: long, text: veryLong })
+  eq(updated.ok, true)
+  eq(updated.macro.label.length, Om.maxLabel)
+  eq(updated.macro.text.length, Om.maxPhrase)
+})
+
 // ---------------------------------------------------------------- done
 
 console.log("")
