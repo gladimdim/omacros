@@ -5,12 +5,13 @@ Text-macro plugin for Omarchy. Not yet listed on the marketplace — new, unveri
 ## Model
 
 - kinds: `service` + `bar-widget`, `keepLoaded: true`. The service owns IPC
-  (`omarchy-shell gladimdim.omacros fire <id>`) and the `wtype` Process; the
-  bar widget owns the icon and the detached `MacrosWindow.qml`. Both watch
-  `~/.local/state/omarchy/omacros.json`.
-- Firing: runtime keybind → omarchy-shell IPC → service →
-  `timeout 15 wtype <phrase>`. The CLI `paste` path bypasses the shell and
-  runs wtype directly.
+  (`omarchy-shell gladimdim.omacros fire <id>`) and the paste chain (Omarchy's
+  `omarchy-clipboard-paste-text --copy-only`, then a hyprctl eval universal
+  paste); the bar widget owns the icon and the detached `MacrosWindow.qml`.
+  Both watch `~/.local/state/omarchy/omacros.json`.
+- Firing: runtime keybind → omarchy-shell IPC → service → clipboard copy +
+  paste chord. The CLI `paste` path prefers the same IPC route and falls
+  back to the helper's Shift+Insert when the shell is not running.
 - Recording captures a combo (modifiers + one key); the service binds it
   over hyprctl eval (`hl.bind`) — runtime state, no config files — and
   re-applies it after every Hyprland reload.
@@ -35,4 +36,5 @@ omakit submit . --category Productivity --tags Bar,Quickshell --json --offline
 - No network, no curl. One write surface: the plugin's own state file under
   `~/.local/state/omarchy/`, via `FileView` atomic writes.
 - All user text renders with `textFormat: Text.PlainText`.
-- Phrases starting with a dash are rejected (`wtype` has no `--` separator).
+- Phrases starting with a dash are rejected (no end-of-options marker in
+  the clipboard helper's argument list).

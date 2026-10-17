@@ -5,7 +5,7 @@
 #   omacros list              List saved macros (id, keys, phrase)
 #   omacros show <id>         Print one macro as JSON
 #   omacros keys <id>         Print the recorded combo, e.g. "SUPER + F3"
-#   omacros paste <id>        Type the phrase with wtype (no shell IPC)
+#   omacros paste <id>       Paste the phrase from the clipboard buffer
 #   omacros bind <id>         Print the o.bind line for ~/.config/hypr/bindings.lua
 #   omacros path              Print the state file path
 
@@ -25,7 +25,7 @@ Commands:
   list              List saved macros (id, keys, phrase)
   show <id>         Print one macro as JSON
   keys <id>         Print the recorded combo, e.g. "SUPER + F3"
-  paste <id>        Type the phrase with wtype (no shell IPC)
+  paste <id>        Paste the phrase from the clipboard buffer
   bind <id>         Print the o.bind line for ~/.config/hypr/bindings.lua
   path              Print the state file path
 USAGE
@@ -127,6 +127,12 @@ PY
   paste)
     phrase="$(jq_get text)"
     [[ -n "$phrase" ]] || fail "no macro with id $id_arg"
-    exec timeout 15 wtype "$phrase"
+    # Same paste-from-buffer flow the running shell performs on the combo:
+    # clipboard + the compositor's universal paste. If the shell is not
+    # running, fall back to Omarchy's helper (clipboard + Shift+Insert).
+    if timeout 5 omarchy-shell "$PLUGIN_ID" "$FIRE_METHOD" "$id_arg" >/dev/null 2>&1; then
+      exit 0
+    fi
+    exec omarchy-clipboard-paste-text --shift-insert "$phrase"
     ;;
 esac

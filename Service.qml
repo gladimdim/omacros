@@ -46,14 +46,18 @@ Item {
     writing = false
   }
 
-  // Type a saved phrase into the focused window. wtype runs under a timeout
-  // so a hung Wayland connection can never leave a process behind.
+  // Fire: set the clipboard from the saved phrase (Omarchy's own helper,
+  // so the phrase also lands in the clipboard manager history), then ask
+  // the running Hyprland to press the paste chord its own SUPER+V
+  // "Universal paste" binding uses. wtype typing was dropped: a typed
+  // phrase can be executed by a shell prompt and is slow for long texts.
   function fire(id) {
     var macro = Omacros.findMacro(macros, id)
     if (!macro) return
-    if (typeProc.running) typeProc.running = false
-    typeProc.command = ["timeout", "15", "wtype", macro.text]
-    typeProc.running = true
+    if (copyProc.running) { copyProc.running = false }
+    pasteEval.running = false
+    copyProc.command = Omacros.pasteCopyCommand(macro)
+    copyProc.running = true
   }
 
   function notify(title, body) {
@@ -160,19 +164,33 @@ Item {
   }
 
   Process {
-    id: typeProc
+    id: copyProc
+    stdout: StdioCollector { waitForEnd: true }
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
         var err = String(text || "").trim()
-        if (err !== "") console.warn("omacros wtype:", err)
+        if (err !== "") console.warn("omacros clipboard copy:", err)
       }
     }
     onExited: function(exitCode) {
-      if (exitCode === 127)
-        root.notify("Omacros", "wtype is not installed — install it to type phrases")
-      else if (exitCode !== 0)
-        console.warn("omacros wtype exited", exitCode)
+      if (exitCode !== 0) {
+        root.notify("Omacros", "Could not put the phrase on the clipboard — re-record the macro's text")
+        return
+      }
+      pasteEval.command = ["timeout", "5", "hyprctl", "eval", Omacros.pasteEvalLua()]
+      pasteEval.running = true
+    }
+  }
+
+  Process {
+    id: pasteEval
+    stdout: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode === 0) return
+      // The phrase is on the clipboard regardless, so a failed paste
+      // still leaves Ctrl+V working by hand.
+      root.notify("Omacros", "Pasted nothing — the phrase is on your clipboard, press Ctrl+V")
     }
   }
 

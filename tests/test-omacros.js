@@ -20,6 +20,10 @@ function eq(actual, expected, label) {
   assert.strictEqual(JSON.stringify(actual), JSON.stringify(expected), label + " → " + JSON.stringify(actual))
 }
 
+function ok(condition) {
+  assert.ok(condition, "expected truthy")
+}
+
 // ---------------------------------------------------------------- state
 
 test("stateDir falls back to ~/.local/state", function() {
@@ -337,6 +341,27 @@ test("addMacro refuses a second macro on the same combo", function() {
   eq(dup.error, "SUPER + F2 is already saved for another macro")
   var variant = Om.addMacro(first.state, { tokens: ["CTRL", "F2"], text: "two" })
   eq(variant.ok, true)
+})
+
+test("pasteCopyCommand builds the clipboard helper argv", function() {
+  eq(Om.pasteCopyCommand(null), null)
+  eq(Om.pasteCopyCommand({ text: "" }), null)
+  eq(Om.pasteCopyCommand({ text: "hello world" }).join(" "),
+    "omarchy-clipboard-paste-text --copy-only hello world")
+  // Dashes inside the text stay verbatim; the helper only treats the two
+  // flags it knows as options.
+  eq(Om.pasteCopyCommand({ text: "-dash inside" }).slice(0, 2).join(" "),
+    "omarchy-clipboard-paste-text --copy-only")
+})
+
+test("pasteEvalLua mirrors the universal paste chord", function() {
+  var lua = Om.pasteEvalLua()
+  ok(lua.indexOf('hl.dsp.send_key_state({ mods = mods, key = "V", state = "down" })') !== -1)
+  ok(lua.indexOf('state = "up" })') !== -1)
+  ok(lua.indexOf('mods = is_terminal and "CTRL SHIFT" or "CTRL"') !== -1)
+  // The chord waits for the clipboard to settle, then splits down/up.
+  ok(lua.indexOf("{ timeout = 150") !== -1)
+  ok(lua.indexOf("{ timeout = 50") !== -1)
 })
 
 // ---------------------------------------------------------------- done

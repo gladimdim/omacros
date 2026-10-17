@@ -354,6 +354,48 @@ function uniq(list) {
   return out
 }
 
+// ---- Paste-on-fire ----------------------------------------------------------
+// Firing pastes the phrase from the clipboard instead of typing it
+// character by character: safer around terminals (a typed phrase can be
+// executed by a shell prompt) and faster for long phrases. Two Omarchy
+// mechanisms chain up:
+//   1. `omarchy clipboard paste text --copy-only <phrase>` sets the
+//      clipboard through Omarchy's own helper, so the phrase also lands
+//      in the clipboard manager history.
+//   2. One hyprctl eval chunk re-sends the paste chord Omarchy's own
+//      SUPER+V "Universal paste" binding uses: CTRL+V, or CTRL+SHIFT+V
+//      when the focused window carries Omarchy's "terminal" tag. It goes
+//      through the compositor (send_key_state), so it reaches layer-shell
+//      surfaces too, and virtual keyboards cannot fake it.
+
+function pasteCopyCommand(macro) {
+  if (!macro) return null
+  var text = String(macro.text || "")
+  if (!text) return null
+  return ["omarchy-clipboard-paste-text", "--copy-only", text]
+}
+
+// Mirrors default/hypr/bindings/clipboard.lua universal_clipboard_shortcut:
+// the down/up split works around send_shortcut leaving synthetic state stuck,
+// and the 150ms lead time matches the helper's own clipboard-settle pause.
+function pasteEvalLua() {
+  return [
+    "local window = hl.get_active_window()",
+    "local is_terminal = false",
+    "for _, tag in ipairs((window and window.tags) or {}) do",
+    '  if (tag:gsub("%*$", "")) == "terminal" then is_terminal = true end',
+    "end",
+    'local mods = is_terminal and "CTRL SHIFT" or "CTRL"',
+    "hl.timer(function()",
+    '  hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = "V", state = "down" }))',
+    "  hl.timer(function()",
+    '    hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = "V", state = "up" }))',
+    "  end, { timeout = 50, type = \"oneshot\" })",
+    "end, { timeout = 150, type = \"oneshot\" })"
+  ].join("\n")
+}
+
+
 // Notification text when a recorded combo already belongs to another bind.
 // Omacros never overrides; it asks for a different combo instead.
 function takenNotice(taken) {
@@ -538,6 +580,8 @@ if (typeof module !== "undefined") {
     runtimeBindLua: runtimeBindLua,
     runtimeUnbindLua: runtimeUnbindLua,
     evalLua: evalLua,
+    pasteCopyCommand: pasteCopyCommand,
+    pasteEvalLua: pasteEvalLua,
     parseBinds: parseBinds,
     appliedFor: appliedFor,
     appliedLookup: appliedLookup,

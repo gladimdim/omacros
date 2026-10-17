@@ -2,7 +2,7 @@
 
 # Omacros (`gladimdim.omacros`)
 
-Text macros (saved phrases) for [Omarchy](https://omarchy.org/). Open the manager from the bar, record a key combo, type the text it should insert, save — done. The combo wires itself up at runtime, so pressing it anywhere types your text into whatever window has focus. Phrases also fire from the command line, no binding needed.
+Text macros (saved phrases) for [Omarchy](https://omarchy.org/). Open the manager from the bar, record a key combo, type the text it should insert, save — done. The combo wires itself up at runtime, so pressing it anywhere pastes your text from the clipboard buffer into whatever window has focus. Phrases also fire from the command line, no binding needed.
 
 ![Omacros preview](preview.png)
 
@@ -18,7 +18,7 @@ Under the hood the binding is runtime state: the service asks Hyprland via its L
 hl.bind("SUPER + F3", hl.dsp.exec_cmd("omarchy-shell gladimdim.omacros fire <id>"), { description = "Omacros: Greet" })
 ```
 
-The bind calls the plugin's IPC handler in the running shell, which types the phrase with `wtype` (Wayland virtual keyboard). Nothing is written to `~/.config/hypr`, nothing runs elevated, and combos already bound by you or another plugin are never overridden — Omacros notifies you and asks for a different combo instead.
+The bind calls the plugin's IPC handler in the running shell, which copies the phrase onto the clipboard (through Omarchy's own `omarchy clipboard paste text` helper, so it lands in the clipboard history too) and then presses the paste chord Omarchy's own `SUPER+V` "Universal paste" uses — `Ctrl+V`, or `Ctrl+Shift+V` when the focused window is a terminal. Nothing is written to `~/.config/hypr`, nothing runs elevated, and combos already bound by you or another plugin are never overridden — Omacros notifies you and asks for a different combo instead.
 
 Prefer a permanent binding in your own config? Run `omacros bind <id>` and paste the printed `o.bind(...)` line into `~/.config/hypr/bindings.lua`.
 
@@ -31,7 +31,7 @@ Left-click the 󰌌 icon in the bar (center section by default) to open it — a
 - Left column: name, combo recorder, phrase, **Save macro**.
 - Below: every saved macro as a table. Click a row to select it, double-click to insert its phrase right now.
 - Keyboard: `↑ ↓` select  ·  `Enter` insert  ·  `Del` remove  ·  `Esc` close or cancel recording.
-- To insert, the window closes first so the text types into the app you were working in.
+- To insert, the window closes first so the paste lands in the app you were working in.
 - Tooltips on the bar icon summarize your saved combos.
 
 ## Command line
@@ -39,7 +39,7 @@ Left-click the 󰌌 icon in the bar (center section by default) to open it — a
 ```bash
 omacros list              # every saved macro: id, keys, phrase
 omacros keys <id>         # the recorded combo
-omacros paste <id>        # insert now (types with wtype)
+omacros paste <id>        # insert now (paste from the clipboard buffer)
 omacros bind <id>         # print a permanent o.bind line for bindings.lua (optional)
 omacros path              # state file path
 ```
@@ -68,17 +68,17 @@ State lives at `~/.local/state/omarchy/omacros.json` (plain JSON — up to 50 ma
 
 ## Notes & limits
 
-- **wtype required** (installed by default on Omarchy). If typing silently fails, check `wtype` runs in your session.
+- **Clipboard replaces**: firing puts the phrase on your clipboard (that's how the paste happens). Omarchy's clipboard history (SUPER+CTRL+V) can hand you anything it overwrote.
 - Runtime binds are compositor state: Hyprland rebuilds them from your config on every reload, so the service re-registers your combos after each one. Removing the plugin also removes its binds.
 - Recorded keys cover letters, digits, `F1`-`F12`, punctuation and navigation keys, with `SUPER`/`CTRL`/`ALT`/`SHIFT` modifiers. Combos already claimed by another binding are kept theirs — Omacros skips and notifies.
-- Phrases are single-line; `wtype` types them character by character, so a fired macro never corrupts your clipboard.
+- Phrases are single-line and never start with a dash (argument safety in the clipboard helper).
 
 ## Files
 
 | Path                 | Role                                                        |
 |----------------------|-------------------------------------------------------------|
 | `manifest.json`      | Plugin manifest (service + bar widget, keepLoaded)          |
-| `Service.qml`        | State, runtime bind sync, IPC (`fire <id>`), `wtype` typing  |
+| `Service.qml`        | State, runtime bind sync, IPC (`fire <id>`), pasting        |
 | `BarWidget.qml`      | Bar icon + macro count badge + opens the manager window     |
 | `MacrosWindow.qml`   | Detached manager: recorder form + saved audit list          |
 | `Omacros.js`         | Shared state/sanitize/bind-plan logic (and test target)     |

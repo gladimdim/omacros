@@ -175,7 +175,7 @@ FloatingWindow {
   }
 
   // Insert the selected phrase into whatever had focus before this window
-  // took it: it closes first so wtype lands there, not in the form.
+  // took it: it closes first so the paste lands there, not in the form.
   function runSelected() {
     var macro = root.selectedMacro()
     if (!macro) return
@@ -751,7 +751,7 @@ FloatingWindow {
 
   Timer {
     id: fireDelay
-    interval: 180
+    interval: 240
     onTriggered: root.doFire()
   }
 
