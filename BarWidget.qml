@@ -76,6 +76,21 @@ BarWidget {
     }
   }
 
+  // A compositor close (SUPER+W, the window's X) tears down the backing
+  // surface, and the window ignores visible = true after that, so the icon
+  // would never open it again. Rebuild a fresh window instead.
+  function rebuildList() {
+    listLoader.active = false
+    listLoader.active = true
+  }
+
+  Connections {
+    target: listLoader.item
+    function onClosed() {
+      Qt.callLater(root.rebuildList)
+    }
+  }
+
   BarIconButton {
     id: button
     anchors.fill: parent
