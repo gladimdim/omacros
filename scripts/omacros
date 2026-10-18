@@ -148,6 +148,10 @@ PY
     fi
     phrase="$(jq_get text)"
     [[ -n "$phrase" ]] || fail "no macro with id $id_arg"
-    exec omarchy-clipboard-paste-text --shift-insert "$phrase"
+    # printf is a bash builtin, so the phrase reaches wl-copy through a pipe
+    # and never appears in a process command line.
+    printf '%s' "$phrase" | wl-copy
+    sleep 0.15
+    wtype -M shift -k Insert -m shift 2>/dev/null || echo "omacros: phrase is on the clipboard, press Ctrl+V"
     ;;
 esac

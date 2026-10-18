@@ -343,15 +343,15 @@ test("addMacro refuses a second macro on the same combo", function() {
   eq(variant.ok, true)
 })
 
-test("pasteCopyCommand builds the clipboard helper argv", function() {
+test("pasteCopyCommand keeps the phrase out of argv", function() {
   eq(Om.pasteCopyCommand(null), null)
   eq(Om.pasteCopyCommand({ text: "" }), null)
-  eq(Om.pasteCopyCommand({ text: "hello world" }).join(" "),
-    "omarchy-clipboard-paste-text --copy-only hello world")
-  // Dashes inside the text stay verbatim; the helper only treats the two
-  // flags it knows as options.
-  eq(Om.pasteCopyCommand({ text: "-dash inside" }).slice(0, 2).join(" "),
-    "omarchy-clipboard-paste-text --copy-only")
+  var argv = Om.pasteCopyCommand({ text: "secret phrase" })
+  eq(argv, ["timeout", "5", "wl-copy"])
+  ok(argv.join(" ").indexOf("secret") === -1)
+  eq(Om.pasteStdinFor({ text: "secret phrase" }), "secret phrase")
+  eq(Om.pasteStdinFor({ kind: "image", image: "a.png", mime: "image/png" }), "")
+  eq(Om.pasteStdinFor(null), "")
 })
 
 test("pasteEvalLua mirrors the universal paste chord", function() {
@@ -522,6 +522,8 @@ test("import script copies real images and rejects the rest", function() {
     var result = Om.parseImport(run.code, run.stdout)
     eq(result, { ok: true, mime: "image/png", image: "abc-1.png" })
     ok(fs.readFileSync(path.join(store, "abc-1.png")).equals(pngBytes))
+    eq((fs.statSync(store).mode & 0o777).toString(8), "700")
+    eq((fs.statSync(path.join(store, "abc-1.png")).mode & 0o777).toString(8), "600")
 
     var fake = path.join(dir, "fake.png")
     fs.writeFileSync(fake, "not an image")

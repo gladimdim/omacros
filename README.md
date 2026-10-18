@@ -18,11 +18,11 @@ Under the hood the binding is runtime state: the service asks Hyprland via its L
 hl.bind("SUPER + F3", hl.dsp.exec_cmd("omarchy-shell gladimdim.omacros fire <id>"), { description = "Omacros: Greet" })
 ```
 
-The bind calls the plugin's IPC handler in the running shell, which copies the phrase onto the clipboard (through Omarchy's own `omarchy clipboard paste text` helper, so it lands in the clipboard history too) and then presses the paste chord Omarchy's own `SUPER+V` "Universal paste" uses — `Ctrl+V`, or `Ctrl+Shift+V` when the focused window is a terminal. Nothing is written to `~/.config/hypr`, nothing runs elevated, and combos already bound by you or another plugin are never overridden — Omacros notifies you and asks for a different combo instead.
+The bind calls the plugin's IPC handler in the running shell, which copies the phrase onto the clipboard (`wl-copy`, fed through stdin so the phrase never shows up in a process command line; Omarchy's clipboard history still records it) and then presses the paste chord Omarchy's own `SUPER+V` "Universal paste" uses — `Ctrl+V`, or `Ctrl+Shift+V` when the focused window is a terminal. Nothing is written to `~/.config/hypr`, nothing runs elevated, and combos already bound by you or another plugin are never overridden — Omacros notifies you and asks for a different combo instead.
 
 Prefer a permanent binding in your own config? Run `omacros bind <id>` and paste the printed `o.bind(...)` line into `~/.config/hypr/bindings.lua`.
 
-Image macros work the same way: the service puts the stored image on the clipboard with its own type (`wl-copy --type image/png < image`) and presses the same paste chord, so it lands in chat apps, browsers, editors — anything that accepts a pasted image. The picked file is copied into `~/.local/state/omarchy/omacros-images/` when you choose it, so the macro keeps working if the original is moved or deleted. Its type is checked from the file's contents, not its extension.
+Image macros work the same way: the service puts the stored image on the clipboard with its own type (`wl-copy --type image/png < image`) and presses the same paste chord, so it lands in chat apps, browsers, editors — anything that accepts a pasted image. The picked file is copied into `~/.local/state/omarchy/omacros-images/` when you choose it, so the macro keeps working if the original is moved or deleted. The folder is private to you (700, files 600). Its type is checked from the file's contents, not its extension.
 
 Phrases without a keybinding still work: press `Enter` on a selected row in the manager, or run `omacros paste <id>`.
 
@@ -73,7 +73,7 @@ State lives at `~/.local/state/omarchy/omacros.json` (plain JSON — up to 50 ma
 - **Clipboard replaces**: firing puts the phrase or image on your clipboard (that's how the paste happens). Omarchy's clipboard history (SUPER+CTRL+V) can hand you anything it overwrote.
 - Runtime binds are compositor state: Hyprland rebuilds them from your config on every reload, so the service re-registers your combos after each one. Removing the plugin also removes its binds.
 - Recorded keys cover letters, digits, `F1`-`F12`, punctuation and navigation keys, with `SUPER`/`CTRL`/`ALT`/`SHIFT` modifiers. Combos already claimed by another binding are kept theirs — Omacros skips and notifies.
-- Phrases are single-line and never start with a dash (argument safety in the clipboard helper).
+- Phrases are single-line and never start with a dash.
 - Images paste wherever the focused app accepts a pasted image; terminals generally don't. Stored images no macro uses any more are cleaned up a day after they were picked.
 
 ## Files

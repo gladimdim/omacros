@@ -27,6 +27,7 @@ Item {
   property bool writing: false
   property var macros: []
   property bool pruned: false
+  property string pendingStdin: ""
 
   // Runtime bind state: what the service last successfully registered, so
   // syncs stay small, plus what it last warned about, so a stuck conflict
@@ -58,9 +59,9 @@ Item {
     writing = false
   }
 
-  // Fire: set the clipboard from the saved phrase (Omarchy's own helper,
-  // so the phrase also lands in the clipboard manager history) or the
-  // stored image (wl-copy with its mime type), then ask
+  // Fire: set the clipboard from the saved phrase (wl-copy reading it from
+  // stdin, so it never shows in a process command line) or the stored
+  // image (wl-copy with its mime type), then ask
   // the running Hyprland to press the paste chord its own SUPER+V
   // "Universal paste" binding uses. wtype typing was dropped: a typed
   // phrase can be executed by a shell prompt and is slow for long texts.
@@ -71,6 +72,8 @@ Item {
     pasteEval.running = false
     var command = Omacros.pasteCopyCommand(macro, imagesDir)
     if (!command) return
+    pendingStdin = Omacros.pasteStdinFor(macro)
+    copyProc.stdinEnabled = pendingStdin !== ""
     copyProc.command = command
     copyProc.running = true
   }
@@ -180,6 +183,13 @@ Item {
 
   Process {
     id: copyProc
+    // Hand the phrase over, then close stdin so wl-copy sees EOF.
+    onStarted: {
+      if (!copyProc.stdinEnabled) return
+      copyProc.write(root.pendingStdin)
+      root.pendingStdin = ""
+      copyProc.stdinEnabled = false
+    }
     stdout: StdioCollector { waitForEnd: true }
     stderr: StdioCollector {
       waitForEnd: true

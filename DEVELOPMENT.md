@@ -5,13 +5,12 @@ Text-macro plugin for Omarchy. Not yet listed on the marketplace — new, unveri
 ## Model
 
 - kinds: `service` + `bar-widget`, `keepLoaded: true`. The service owns IPC
-  (`omarchy-shell gladimdim.omacros fire <id>`) and the paste chain (Omarchy's
-  `omarchy-clipboard-paste-text --copy-only`, then a hyprctl eval universal
-  paste); the bar widget owns the icon and the detached `MacrosWindow.qml`.
+  (`omarchy-shell gladimdim.omacros fire <id>`) and the paste chain (`wl-copy`
+  fed through stdin, then a hyprctl eval universal paste); the bar widget owns the icon and the detached `MacrosWindow.qml`.
   Both watch `~/.local/state/omarchy/omacros.json`.
 - Firing: runtime keybind → omarchy-shell IPC → service → clipboard copy +
   paste chord. Image macros (`kind: "image"`) copy their stored file with
-  `wl-copy --type <mime>` instead of the text helper.
+  `wl-copy --type <mime>`.
 - Image import: the window copies a picked file into
   `~/.local/state/omarchy/omacros-images/<id>.<ext>`; the type comes from
   magic bytes (od), not the extension. State only stores the generated
@@ -46,5 +45,9 @@ omakit submit . --category Productivity --tags Bar,Quickshell --json --offline
   nothing outside that folder). Paths and mime types reach `sh -c` scripts
   only as positional arguments.
 - All user text renders with `textFormat: Text.PlainText`.
-- Phrases starting with a dash are rejected (no end-of-options marker in
-  the clipboard helper's argument list).
+- Macro text never travels in argv (readable by any local user via
+  `/proc/<pid>/cmdline`): the service writes it to wl-copy's stdin and the
+  CLI fallback pipes it from the `printf` builtin. Stored images live in a
+  700 folder with 600 files (`umask 077` in the import script).
+- Phrases starting with a dash are still rejected (kept for compatibility
+  with older tooling).

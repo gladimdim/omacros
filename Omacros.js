@@ -404,21 +404,24 @@ function uniq(list) {
 // ---- Paste-on-fire ----------------------------------------------------------
 // Firing pastes the phrase from the clipboard instead of typing it
 // character by character: safer around terminals (a typed phrase can be
-// executed by a shell prompt) and faster for long phrases. Two Omarchy
-// mechanisms chain up:
-//   1. `omarchy clipboard paste text --copy-only <phrase>` sets the
-//      clipboard through Omarchy's own helper, so the phrase also lands
-//      in the clipboard manager history.
+// executed by a shell prompt) and faster for long phrases. Two steps chain
+// up:
+//   1. wl-copy sets the clipboard. A phrase goes in through stdin, never as
+//      an argument: argv is readable by every local user through
+//      /proc/<pid>/cmdline. Omarchy's clipboard history watches the
+//      clipboard itself, so the phrase still lands there.
 //   2. One hyprctl eval chunk re-sends the paste chord Omarchy's own
 //      SUPER+V "Universal paste" binding uses: CTRL+V, or CTRL+SHIFT+V
 //      when the focused window carries Omarchy's "terminal" tag. It goes
 //      through the compositor (send_key_state), so it reaches layer-shell
 //      surfaces too, and virtual keyboards cannot fake it.
 
-// Image macros skip the helper (it only takes text) and hand the stored file
-// to wl-copy with its mime type. Mime and path travel as positional
-// arguments, never spliced into the script text.
+// Image macros hand the stored file to wl-copy with its mime type. Mime and
+// path travel as positional arguments, never spliced into the script text.
 var imageCopyScript = 'exec wl-copy --type "$1" < "$2"'
+
+// The argv that sets the clipboard for a macro. Text macros also need
+// pasteStdinFor(macro) written to the process's stdin.
 
 function pasteCopyCommand(macro, dir) {
   if (!macro) return null
@@ -428,9 +431,14 @@ function pasteCopyCommand(macro, dir) {
     if (!mime || !path) return null
     return ["timeout", "5", "sh", "-c", imageCopyScript, "omacros-copy", mime, path]
   }
-  var text = String(macro.text || "")
-  if (!text) return null
-  return ["omarchy-clipboard-paste-text", "--copy-only", text]
+  if (!String(macro.text || "")) return null
+  return ["timeout", "5", "wl-copy"]
+}
+
+// What a text macro's copy process reads from stdin ("" for images).
+function pasteStdinFor(macro) {
+  if (!macro || macro.kind === "image") return ""
+  return String(macro.text || "")
 }
 
 // Mirrors default/hypr/bindings/clipboard.lua universal_clipboard_shortcut:
@@ -455,11 +463,13 @@ function pasteEvalLua() {
 
 
 // ---- Image import -----------------------------------------------------------
-// Copies a picked file into imagesDir under a fresh name. The type comes
+// Copies a picked file into imagesDir under a fresh name, private to the
+// user (umask 077: folder 700, files 600). The type comes
 // from the file's magic bytes, not its extension, so only real PNG, JPEG,
 // GIF, WebP and BMP data is accepted. Prints "<mime>\t<name>" on success.
 // $1 source path, $2 images dir, $3 base name, $4 max bytes.
 var importScript = [
+  'umask 077',
   'src=$1; dir=$2; base=$3; max=$4',
   '[ -f "$src" ] && [ -r "$src" ] || exit 2',
   'size=$(stat -c %s -- "$src") || exit 2',
@@ -473,7 +483,7 @@ var importScript = [
   '  424d*) mime=image/bmp; ext=bmp ;;',
   '  *) exit 4 ;;',
   'esac',
-  'mkdir -p -- "$dir" || exit 5',
+  'mkdir -p -- "$dir" && chmod 700 -- "$dir" || exit 5',
   'cp -- "$src" "$dir/.$base.tmp" && mv -f -- "$dir/.$base.tmp" "$dir/$base.$ext" || { rm -f -- "$dir/.$base.tmp"; exit 5; }',
   'printf "%s\\t%s\\n" "$mime" "$base.$ext"'
 ].join("\n")
@@ -647,8 +657,8 @@ function findMacro(macros, id) {
 function addMacro(raw, input, now) {  now = now || new Date()
   var content = contentFor(input)
   if (!content.ok) return content
-  // The clipboard helper has no end-of-options marker; a phrase starting
-  // with "-" would be read as one.
+  // Kept from the argv era: the CLI fallback and older installs still hand
+  // phrases to tools that read a leading "-" as an option.
   if (content.kind === "text" && content.text.charAt(0) === "-") return { ok: false, error: "Phrases can't start with a dash" }
 
   var tokens = sanitizeTokens(input && input.tokens)
@@ -813,6 +823,7 @@ if (typeof module !== "undefined") {
     runtimeUnbindLua: runtimeUnbindLua,
     evalLua: evalLua,
     pasteCopyCommand: pasteCopyCommand,
+    pasteStdinFor: pasteStdinFor,
     pasteEvalLua: pasteEvalLua,
     parseBinds: parseBinds,
     appliedFor: appliedFor,
