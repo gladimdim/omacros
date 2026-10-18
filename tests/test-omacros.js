@@ -31,8 +31,9 @@ test("stateDir falls back to ~/.local/state", function() {
   eq(Om.stateDir("/home/u", "/xdg"), "/xdg/omarchy")
 })
 
-test("statePath ends in omacros.json", function() {
-  eq(Om.statePath("/home/u", ""), "/home/u/.local/state/omarchy/omacros.json")
+test("statePath sits in the private omacros folder", function() {
+  eq(Om.privateDir("/home/u", ""), "/home/u/.local/state/omarchy/omacros")
+  eq(Om.statePath("/home/u", ""), "/home/u/.local/state/omarchy/omacros/omacros.json")
 })
 
 test("emptyState shape", function() {
@@ -441,7 +442,7 @@ function runArgv(argv) {
 var pngBytes = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex")
 
 test("imagesDir sits next to the state file", function() {
-  eq(Om.imagesDir("/home/u", ""), "/home/u/.local/state/omarchy/omacros-images")
+  eq(Om.imagesDir("/home/u", ""), "/home/u/.local/state/omarchy/omacros/images")
 })
 
 test("sanitizeImageName only accepts generated names", function() {
@@ -560,6 +561,35 @@ test("stateIsValid only trusts state that parsed", function() {
   eq(Om.stateIsValid("{broken"), false)
   eq(Om.stateIsValid(JSON.stringify({ version: 2, macros: [] })), false)
   eq(Om.stateIsValid(JSON.stringify({ version: 1, macros: [] })), true)
+})
+
+test("prepare makes the folder private and migrates old files", function() {
+  var home = fs.mkdtempSync(path.join(os.tmpdir(), "omacros-test-"))
+  try {
+    var base = path.join(home, ".local/state/omarchy")
+    fs.mkdirSync(path.join(base, "omacros-images"), { recursive: true })
+    fs.writeFileSync(path.join(base, "omacros.json"), "{}", { mode: 0o644 })
+    fs.writeFileSync(path.join(base, "omacros-images", "a.png"), pngBytes, { mode: 0o644 })
+    fs.writeFileSync(path.join(base, "other.json"), "keep")
+    var baseMode = fs.statSync(base).mode
+    eq(runArgv(Om.prepareCommand(home, "")).code, 0)
+    var dir = Om.privateDir(home, "")
+    function mode(p) { return (fs.statSync(p).mode & 0o777).toString(8) }
+    eq(mode(dir), "700")
+    eq(mode(Om.statePath(home, "")), "600")
+    eq(mode(Om.imagesDir(home, "")), "700")
+    eq(mode(path.join(Om.imagesDir(home, ""), "a.png")), "600")
+    eq(fs.existsSync(path.join(base, "omacros.json")), false)
+    eq(fs.existsSync(path.join(base, "omacros-images")), false)
+    eq(fs.readFileSync(path.join(base, "other.json"), "utf8"), "keep")
+    eq(fs.statSync(base).mode, baseMode)
+
+    // A second run is a no-op that keeps the migrated files.
+    eq(runArgv(Om.prepareCommand(home, "")).code, 0)
+    eq(fs.readFileSync(Om.statePath(home, ""), "utf8"), "{}")
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
 })
 
 // ---------------------------------------------------------------- done

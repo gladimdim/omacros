@@ -22,7 +22,7 @@ The bind calls the plugin's IPC handler in the running shell, which copies the p
 
 Prefer a permanent binding in your own config? Run `omacros bind <id>` and paste the printed `o.bind(...)` line into `~/.config/hypr/bindings.lua`.
 
-Image macros work the same way: the service puts the stored image on the clipboard with its own type (`wl-copy --type image/png < image`) and presses the same paste chord, so it lands in chat apps, browsers, editors — anything that accepts a pasted image. The picked file is copied into `~/.local/state/omarchy/omacros-images/` when you choose it, so the macro keeps working if the original is moved or deleted. The folder is private to you (700, files 600). Its type is checked from the file's contents, not its extension.
+Image macros work the same way: the service puts the stored image on the clipboard with its own type (`wl-copy --type image/png < image`) and presses the same paste chord, so it lands in chat apps, browsers, editors — anything that accepts a pasted image. The picked file is copied into `~/.local/state/omarchy/omacros/images/` when you choose it, so the macro keeps working if the original is moved or deleted. Its type is checked from the file's contents, not its extension.
 
 Phrases without a keybinding still work: press `Enter` on a selected row in the manager, or run `omacros paste <id>`.
 
@@ -66,7 +66,7 @@ omarchy bar move gladimdim.omacros --section center --after omarchy.clock
 omarchy plugin remove gladimdim.omacros --yes
 ```
 
-State lives at `~/.local/state/omarchy/omacros.json` (plain JSON — up to 50 macros, 512 characters each), with image macros' copies in `~/.local/state/omarchy/omacros-images/`. Delete both to reset.
+Everything lives in `~/.local/state/omarchy/omacros/`, a folder only you can read (700, files 600): `omacros.json` (plain JSON — up to 50 macros, 512 characters each) and `images/` with the image macros' copies. Delete the folder to reset. Older versions kept these directly in `~/.local/state/omarchy/`; the service moves them on its first start.
 
 ## Notes & limits
 

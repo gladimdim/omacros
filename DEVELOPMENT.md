@@ -7,12 +7,15 @@ Text-macro plugin for Omarchy. Not yet listed on the marketplace — new, unveri
 - kinds: `service` + `bar-widget`, `keepLoaded: true`. The service owns IPC
   (`omarchy-shell gladimdim.omacros fire <id>`) and the paste chain (`wl-copy`
   fed through stdin, then a hyprctl eval universal paste); the bar widget owns the icon and the detached `MacrosWindow.qml`.
-  Both watch `~/.local/state/omarchy/omacros.json`.
+  Both watch `~/.local/state/omarchy/omacros/omacros.json`. The folder is
+  created 0700 by the service's `prepareCommand` on start, which also
+  migrates pre-1.3.1 files from `~/.local/state/omarchy/` and sets 0600 on
+  the state file and images.
 - Firing: runtime keybind → omarchy-shell IPC → service → clipboard copy +
   paste chord. Image macros (`kind: "image"`) copy their stored file with
   `wl-copy --type <mime>`.
 - Image import: the window copies a picked file into
-  `~/.local/state/omarchy/omacros-images/<id>.<ext>`; the type comes from
+  `~/.local/state/omarchy/omacros/images/<id>.<ext>`; the type comes from
   magic bytes (od), not the extension. State only stores the generated
   name (`sanitizeImageName`), never a path. The service prunes
   unreferenced images older than a day, once per start, and only when the
@@ -40,9 +43,10 @@ omakit submit . --category Productivity --tags Bar,Quickshell --json --offline
   wrapped in `timeout` (no naked long-lived children), `StdioCollector`
   with `waitForEnd`, explicit `onExited` handling.
 - No network, no curl. Write surface: the plugin's own state file under
-  `~/.local/state/omarchy/` (via `FileView` atomic writes) and its own
-  `omacros-images/` folder next to it (import copies, prune deletes —
-  nothing outside that folder). Paths and mime types reach `sh -c` scripts
+  `~/.local/state/omarchy/omacros/` (0700; `FileView` atomic writes) and its
+  `images/` folder inside (import copies, prune deletes — nothing outside
+  that folder). The one-time migration moves the two pre-1.3.1 paths out
+  of the shared Omarchy dir and touches nothing else there. Paths and mime types reach `sh -c` scripts
   only as positional arguments.
 - All user text renders with `textFormat: Text.PlainText`.
 - Macro text never travels in argv (readable by any local user via

@@ -18,7 +18,6 @@ Item {
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME")
-  readonly property string dir: Omacros.stateDir(home, stateHome)
   readonly property string path: Omacros.statePath(home, stateHome)
   readonly property string imagesDir: Omacros.imagesDir(home, stateHome)
 
@@ -134,7 +133,9 @@ Item {
 
   Process {
     id: ensureDir
-    command: ["timeout", "5", "mkdir", "-p", root.dir]
+    // Private 0700 folder, migration from the old shared location, and
+    // 0600 files — all before the first read.
+    command: Omacros.prepareCommand(root.home, root.stateHome)
     onExited: store.reload()
   }
 

@@ -55,12 +55,26 @@ BarWidget {
   onSettingsChanged: injectList()
 
   FileView {
+    id: countStore
     path: root.path
     watchChanges: true
     printErrors: false
     onLoaded: root.applyCount(text())
-    onLoadFailed: root.applyCount("")
+    onLoadFailed: {
+      root.applyCount("")
+      // The service may still be creating the folder or migrating an older
+      // state file into it; look again shortly.
+      if (root.countRetries < 3) { root.countRetries++; countRetry.restart() }
+    }
     onFileChanged: reload()
+  }
+
+  property int countRetries: 0
+
+  Timer {
+    id: countRetry
+    interval: 2000
+    onTriggered: countStore.reload()
   }
 
   // The window manages its own visibility (starts closed; open() shows it).

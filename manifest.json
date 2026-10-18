@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "gladimdim.omacros",
   "name": "Omacros",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "author": "Dmytro Gladkyi",
   "license": "MIT",
   "description": "Text and image macros for Omarchy. Record a key combo and the phrase or image it should insert, manage them all from one detached window, and fire them automatically — combos wire themselves up, no config files touched.",

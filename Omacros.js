@@ -19,7 +19,13 @@ var applyRulesMethod = "applyRules"
 // Image macros keep their own copy of the picked file here, next to the
 // state file, so a saved macro never points at an arbitrary path and keeps
 // working after the original is moved or deleted.
-var imageDirName = "omacros-images"
+var imageDirName = "images"
+// Everything Omacros keeps (state file + images) lives in its own folder
+// under Omarchy's state dir, created 0700 so the saved phrases and images
+// are private to the user whatever the umask. Older versions kept both
+// directly in the shared Omarchy dir; prepareCommand migrates them.
+var privateDirName = "omacros"
+var legacyImageDirName = "omacros-images"
 var maxImageBytes = 20 * 1024 * 1024
 var imageMimes = {
   "image/png": "png",
@@ -59,12 +65,40 @@ function stateDir(home, stateHome) {
   return base + "/omarchy"
 }
 
+function privateDir(home, stateHome) {
+  return stateDir(home, stateHome) + "/" + privateDirName
+}
+
 function statePath(home, stateHome) {
-  return stateDir(home, stateHome) + "/" + stateFileName
+  return privateDir(home, stateHome) + "/" + stateFileName
 }
 
 function imagesDir(home, stateHome) {
-  return stateDir(home, stateHome) + "/" + imageDirName
+  return privateDir(home, stateHome) + "/" + imageDirName
+}
+
+// Creates the private folder (0700), moves a pre-1.3.1 state file and image
+// folder into it, and tightens anything already there: files 0600,
+// folders 0700. Runs once per service start, before the state is read.
+// $1 Omarchy state dir, $2 private dir, $3 state file name, $4 images dir
+// name, $5 legacy images dir name.
+var prepareScript = [
+  'umask 077',
+  'base=$1; dir=$2; file=$3; images=$4; legacy=$5',
+  'mkdir -p -- "$dir" && chmod 700 -- "$dir" || exit 1',
+  '[ -f "$base/$file" ] && [ ! -e "$dir/$file" ] && mv -- "$base/$file" "$dir/$file"',
+  '[ -d "$base/$legacy" ] && [ ! -e "$dir/$images" ] && mv -- "$base/$legacy" "$dir/$images"',
+  '[ -f "$dir/$file" ] && chmod 600 -- "$dir/$file"',
+  'if [ -d "$dir/$images" ]; then',
+  '  chmod 700 -- "$dir/$images"',
+  '  find "$dir/$images" -maxdepth 1 -type f -exec chmod 600 -- {} +',
+  'fi',
+  'exit 0'
+].join("\n")
+
+function prepareCommand(home, stateHome) {
+  return ["timeout", "5", "sh", "-c", prepareScript, "omacros-prepare",
+    stateDir(home, stateHome), privateDir(home, stateHome), stateFileName, imageDirName, legacyImageDirName]
 }
 
 function emptyState() {
@@ -789,6 +823,8 @@ if (typeof module !== "undefined") {
     imageMimes: imageMimes,
     imageNameFilters: imageNameFilters,
     imagesDir: imagesDir,
+    privateDir: privateDir,
+    prepareCommand: prepareCommand,
     sanitizeImageName: sanitizeImageName,
     sanitizeMime: sanitizeMime,
     imagePathFor: imagePathFor,
