@@ -20,11 +20,13 @@ Item {
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME")
   readonly property string dir: Omacros.stateDir(home, stateHome)
   readonly property string path: Omacros.statePath(home, stateHome)
+  readonly property string imagesDir: Omacros.imagesDir(home, stateHome)
 
   property string rawText: ""
   property bool ready: false
   property bool writing: false
   property var macros: []
+  property bool pruned: false
 
   // Runtime bind state: what the service last successfully registered, so
   // syncs stay small, plus what it last warned about, so a stuck conflict
@@ -37,6 +39,16 @@ Item {
     var state = Omacros.parseState(rawText)
     macros = state.macros
     bindSync.restart()
+    pruneImages()
+  }
+
+  // Once per shell start, after the state file parsed cleanly: drop stored
+  // images no macro references any more.
+  function pruneImages() {
+    if (pruned || !Omacros.stateIsValid(rawText)) return
+    pruned = true
+    pruneProc.command = Omacros.pruneCommand(imagesDir, macros)
+    pruneProc.running = true
   }
 
   function persist(state) {
@@ -47,7 +59,8 @@ Item {
   }
 
   // Fire: set the clipboard from the saved phrase (Omarchy's own helper,
-  // so the phrase also lands in the clipboard manager history), then ask
+  // so the phrase also lands in the clipboard manager history) or the
+  // stored image (wl-copy with its mime type), then ask
   // the running Hyprland to press the paste chord its own SUPER+V
   // "Universal paste" binding uses. wtype typing was dropped: a typed
   // phrase can be executed by a shell prompt and is slow for long texts.
@@ -56,7 +69,9 @@ Item {
     if (!macro) return
     if (copyProc.running) { copyProc.running = false }
     pasteEval.running = false
-    copyProc.command = Omacros.pasteCopyCommand(macro)
+    var command = Omacros.pasteCopyCommand(macro, imagesDir)
+    if (!command) return
+    copyProc.command = command
     copyProc.running = true
   }
 
@@ -175,7 +190,7 @@ Item {
     }
     onExited: function(exitCode) {
       if (exitCode !== 0) {
-        root.notify("Omacros", "Could not put the phrase on the clipboard — re-record the macro's text")
+        root.notify("Omacros", "Could not put the macro on the clipboard — edit it and save it again")
         return
       }
       pasteEval.command = ["timeout", "5", "hyprctl", "eval", Omacros.pasteEvalLua()]
@@ -247,5 +262,9 @@ Item {
 
   Process {
     id: ruleProc
+  }
+
+  Process {
+    id: pruneProc
   }
 }

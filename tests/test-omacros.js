@@ -426,6 +426,140 @@ test("updateMacro re-runs every sanitize rule", function() {
   eq(updated.macro.text.length, Om.maxPhrase)
 })
 
+// ---------------------------------------------------------------- images
+
+var fs = require("fs")
+var os = require("os")
+var path = require("path")
+var childProcess = require("child_process")
+
+function runArgv(argv) {
+  var r = childProcess.spawnSync(argv[0], argv.slice(1), { encoding: "utf8" })
+  return { code: r.status, stdout: r.stdout }
+}
+
+var pngBytes = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex")
+
+test("imagesDir sits next to the state file", function() {
+  eq(Om.imagesDir("/home/u", ""), "/home/u/.local/state/omarchy/omacros-images")
+})
+
+test("sanitizeImageName only accepts generated names", function() {
+  eq(Om.sanitizeImageName("abc-1.png"), "abc-1.png")
+  eq(Om.sanitizeImageName("abc_1.webp"), "abc_1.webp")
+  eq(Om.sanitizeImageName("../x.png"), "")
+  eq(Om.sanitizeImageName("/tmp/x.png"), "")
+  eq(Om.sanitizeImageName("x.svg"), "")
+  eq(Om.sanitizeImageName("x.jpeg"), "")
+  eq(Om.imagePathFor("/d/", "a.png"), "/d/a.png")
+  eq(Om.imagePathFor("/d", "../a.png"), "")
+})
+
+test("localPathFromUrl decodes file URLs", function() {
+  eq(Om.localPathFromUrl("file:///home/u/My%20Pics/a.png"), "/home/u/My Pics/a.png")
+  eq(Om.localPathFromUrl("/plain/path.png"), "/plain/path.png")
+  eq(Om.localPathFromUrl("https://example.com/a.png"), "")
+  eq(Om.localPathFromUrl("file:///bad%E0%A4%A"), "")
+})
+
+test("addMacro stores an image macro without text", function() {
+  var result = Om.addMacro("", { tokens: ["SUPER", "F4"], kind: "image", image: "pic-1.png", mime: "image/png", text: "ignored" })
+  eq(result.ok, true)
+  eq(result.macro.kind, "image")
+  eq(result.macro.image, "pic-1.png")
+  eq(result.macro.mime, "image/png")
+  eq(result.macro.text, "")
+  var parsed = Om.parseState(Om.encode(result.state))
+  eq(parsed.macros[0].image, "pic-1.png")
+})
+
+test("image macros need a stored image with a matching type", function() {
+  eq(Om.addMacro("", { tokens: ["SUPER", "F4"], kind: "image" }).error, "Choose an image first")
+  eq(Om.addMacro("", { tokens: ["SUPER", "F4"], kind: "image", image: "a.png", mime: "image/jpeg" }).ok, false)
+  eq(Om.addMacro("", { tokens: ["SUPER", "F4"], kind: "image", image: "../a.png", mime: "image/png" }).ok, false)
+  eq(Om.addMacro("", { tokens: ["SUPER", "F4"], kind: "image", image: "a.png", mime: "text/html" }).ok, false)
+})
+
+test("updateMacro switches a macro between text and image", function() {
+  var first = Om.addMacro("", { tokens: ["SUPER", "F4"], text: "hello" })
+  var id = first.macro.id
+  var toImage = Om.updateMacro(Om.encode(first.state), id, { tokens: ["SUPER", "F4"], kind: "image", image: "p.gif", mime: "image/gif" })
+  eq(toImage.ok, true)
+  eq([toImage.macro.kind, toImage.macro.image, toImage.macro.text], ["image", "p.gif", ""])
+  var toText = Om.updateMacro(Om.encode(toImage.state), id, { tokens: ["SUPER", "F4"], kind: "text", text: "back" })
+  eq(toText.ok, true)
+  eq([toText.macro.kind, toText.macro.text, toText.macro.image], ["text", "back", undefined])
+})
+
+test("legacy text macros parse as kind text", function() {
+  var raw = JSON.stringify({ version: 1, macros: [{ id: "a1", tokens: ["SUPER", "F2"], text: "hi", createdAt: 1 }] })
+  eq(Om.parseState(raw).macros[0].kind, "text")
+})
+
+test("summaryFor, tooltip and list describe images", function() {
+  var img = { id: "i1", keys: "SUPER + F4", kind: "image", image: "i1.png", mime: "image/png" }
+  eq(Om.summaryFor(img), "[image] i1.png")
+  eq(Om.summaryFor({ text: "hi" }), "hi")
+  eq(Om.listFor([img]), "i1\tSUPER + F4\t[image] i1.png")
+  eq(Om.tooltipFor([img]), "SUPER + F4  [image] i1.png")
+})
+
+test("pasteCopyCommand copies a stored image with its type", function() {
+  var argv = Om.pasteCopyCommand({ kind: "image", image: "i1.png", mime: "image/png" }, "/s/omacros-images")
+  eq(argv.slice(0, 4), ["timeout", "5", "sh", "-c"])
+  eq(argv.slice(5), ["omacros-copy", "image/png", "/s/omacros-images/i1.png"])
+  eq(Om.pasteCopyCommand({ kind: "image", image: "../i1.png", mime: "image/png" }, "/s"), null)
+  eq(Om.pasteCopyCommand({ kind: "image", image: "i1.png", mime: "image/svg+xml" }, "/s"), null)
+})
+
+test("import script copies real images and rejects the rest", function() {
+  var dir = fs.mkdtempSync(path.join(os.tmpdir(), "omacros-test-"))
+  try {
+    var src = path.join(dir, "my pic.png")
+    fs.writeFileSync(src, pngBytes)
+    var store = path.join(dir, "images")
+    var run = runArgv(Om.importCommand(src, store, "abc-1"))
+    var result = Om.parseImport(run.code, run.stdout)
+    eq(result, { ok: true, mime: "image/png", image: "abc-1.png" })
+    ok(fs.readFileSync(path.join(store, "abc-1.png")).equals(pngBytes))
+
+    var fake = path.join(dir, "fake.png")
+    fs.writeFileSync(fake, "not an image")
+    var bad = runArgv(Om.importCommand(fake, store, "abc-2"))
+    eq(Om.parseImport(bad.code, bad.stdout).ok, false)
+    eq(bad.code, 4)
+    eq(Om.parseImport(runArgv(Om.importCommand(path.join(dir, "missing.png"), store, "abc-3")).code, "").error, "Can't read that file")
+    eq(Om.importCommand("relative.png", store, "x"), null)
+    eq(Om.importCommand(src, store, "bad/id"), null)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("prune removes only old unreferenced images", function() {
+  var dir = fs.mkdtempSync(path.join(os.tmpdir(), "omacros-test-"))
+  try {
+    var old = new Date(Date.now() - 3 * 86400000)
+    ;["kept.png", "orphan.png", "fresh.png"].forEach(function(name) {
+      fs.writeFileSync(path.join(dir, name), pngBytes)
+    })
+    fs.utimesSync(path.join(dir, "kept.png"), old, old)
+    fs.utimesSync(path.join(dir, "orphan.png"), old, old)
+    var argv = Om.pruneCommand(dir, [{ kind: "image", image: "kept.png" }, { kind: "text", text: "x" }])
+    eq(runArgv(argv).code, 0)
+    eq(fs.readdirSync(dir).sort(), ["fresh.png", "kept.png"])
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("stateIsValid only trusts state that parsed", function() {
+  eq(Om.stateIsValid(""), false)
+  eq(Om.stateIsValid("{broken"), false)
+  eq(Om.stateIsValid(JSON.stringify({ version: 2, macros: [] })), false)
+  eq(Om.stateIsValid(JSON.stringify({ version: 1, macros: [] })), true)
+})
+
 // ---------------------------------------------------------------- done
 
 console.log("")

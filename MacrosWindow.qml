@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -21,6 +22,7 @@ FloatingWindow {
   readonly property string home: Quickshell.env("HOME")
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME")
   readonly property string path: Omacros.statePath(home, stateHome)
+  readonly property string imagesDir: Omacros.imagesDir(home, stateHome)
   readonly property color contentForeground: bar ? bar.foreground : Color.popups.text
   readonly property color contentMuted: Qt.darker(contentForeground, 1.4)
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
@@ -45,6 +47,12 @@ FloatingWindow {
   property string comboKeys: ""
   // When set, the form is editing this macro id instead of creating one.
   property string editingId: ""
+  // What the form inserts: "text" (phraseField) or "image" (a picked file,
+  // already copied into imagesDir as imageName).
+  property string formKind: "text"
+  property string imageName: ""
+  property string imageMime: ""
+  property bool importing: false
   property string statusText: ""
   property bool statusIsError: false
   property string pendingFireId: ""
@@ -114,6 +122,41 @@ FloatingWindow {
     heldMods = ""
     labelField.text = ""
     phraseField.text = ""
+    formKind = "text"
+    imageName = ""
+    imageMime = ""
+  }
+
+  function imageUrl(name) {
+    var path = Omacros.imagePathFor(imagesDir, name)
+    return path ? "file://" + path : ""
+  }
+
+  function chooseImage() {
+    if (importing) return
+    if (recording) cancelRecording()
+    imageDialog.open()
+  }
+
+  // The picked file is copied into imagesDir right away (type checked by its
+  // content), so the macro keeps working if the original moves. Saving the
+  // form is what makes a macro reference it.
+  function importImage(url) {
+    var command = Omacros.importCommand(Omacros.localPathFromUrl(url), imagesDir, Omacros.newId())
+    if (!command) { setStatus("Can't read that file", true); return }
+    importing = true
+    setStatus("Importing image …", false)
+    importProc.command = command
+    importProc.running = true
+  }
+
+  function finishImport(exitCode, stdout) {
+    importing = false
+    var result = Omacros.parseImport(exitCode, stdout)
+    if (!result.ok) { setStatus(result.error, true); return }
+    imageName = result.image
+    imageMime = result.mime
+    setStatus("Image ready — " + (editingId !== "" ? "press Update" : "record a combo and save"), false)
   }
 
   // Clicking a saved row loads it into the form: combo, label and phrase
@@ -125,7 +168,10 @@ FloatingWindow {
     comboTokens = macro.tokens || []
     comboKeys = String(macro.keys || "")
     labelField.text = String(macro.label || "")
-    phraseField.text = String(macro.text || "")
+    formKind = macro.kind === "image" ? "image" : "text"
+    phraseField.text = formKind === "text" ? String(macro.text || "") : ""
+    imageName = formKind === "image" ? String(macro.image || "") : ""
+    imageMime = formKind === "image" ? String(macro.mime || "") : ""
     selectMacro(macro.id)
     setStatus("Editing " + (comboKeys || "macro") + " — change the values and press Update, or Clear to start a new macro", false)
   }
@@ -155,17 +201,21 @@ FloatingWindow {
 
   function save() {
     if (recording) cancelRecording()
+    if (importing) { setStatus("Still importing the image — one moment", true); return }
     var input = {
       label: labelField.text,
       tokens: comboTokens,
-      text: phraseField.text
+      kind: formKind,
+      text: phraseField.text,
+      image: imageName,
+      mime: imageMime
     }
     if (editingId !== "") {
       var updated = Omacros.updateMacro(rawText, editingId, input)
       if (!updated.ok) { setStatus(updated.error, true); return }
       persist(updated.state)
       populateFrom(updated.macro)
-      setStatus("Updated. " + updated.macro.keys + " fires the new text everywhere — the combo re-wires itself automatically.", false)
+      setStatus("Updated. " + updated.macro.keys + " fires the new " + (updated.macro.kind === "image" ? "image" : "text") + " everywhere — the combo re-wires itself automatically.", false)
       return
     }
     var result = Omacros.addMacro(rawText, input)
@@ -508,17 +558,98 @@ FloatingWindow {
           width: parent.width * 0.56
           spacing: Style.space(8)
 
-          Text {
-            textFormat: Text.PlainText
-            text: "Text to insert"
-            color: root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
-            font.bold: true
+          Row {
+            spacing: Style.space(8)
+
+            Text {
+              textFormat: Text.PlainText
+              text: "Insert"
+              color: root.contentForeground
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              font.bold: true
+              anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Button {
+              text: "Text"
+              selected: root.formKind === "text"
+              foreground: root.contentForeground
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              onClicked: root.formKind = "text"
+            }
+
+            Button {
+              text: "Image"
+              selected: root.formKind === "image"
+              foreground: root.contentForeground
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              onClicked: root.formKind = "image"
+            }
+          }
+
+          Row {
+            visible: root.formKind === "image"
+            width: parent.width
+            spacing: Style.space(8)
+
+            Button {
+              id: chooseButton
+              text: root.importing ? "Importing …" : (root.imageName !== "" ? "Replace image…" : "Choose image…")
+              foreground: root.contentForeground
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              onClicked: root.chooseImage()
+            }
+
+            Rectangle {
+              width: Style.space(64)
+              height: Style.space(48)
+              radius: Math.max(0, Style.cornerRadius - 2)
+              color: Util.alpha(root.contentForeground, 0.08)
+              clip: true
+
+              Image {
+                id: formPreview
+                anchors.fill: parent
+                anchors.margins: 2
+                source: root.imageUrl(root.imageName)
+                sourceSize.height: Style.space(96)
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+                cache: false
+              }
+
+              Text {
+                visible: root.imageName === ""
+                textFormat: Text.PlainText
+                anchors.centerIn: parent
+                text: "none"
+                color: root.contentMuted
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            Text {
+              width: parent.width - chooseButton.width - Style.space(64) - parent.spacing * 2
+              textFormat: Text.PlainText
+              text: root.imageName !== ""
+                ? root.imageMime.replace("image/", "").toUpperCase() + " · the combo pastes it as an image"
+                : "PNG, JPEG, GIF, WebP or BMP"
+              color: root.contentMuted
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+              anchors.verticalCenter: parent.verticalCenter
+            }
           }
 
           TextField {
             id: phraseField
+            visible: root.formKind === "text"
             width: parent.width
             foreground: root.contentForeground
             font.family: root.contentFontFamily
@@ -542,7 +673,7 @@ FloatingWindow {
             }
 
             Button {
-              visible: root.editingId !== "" || root.comboKeys !== "" || phraseField.text !== "" || labelField.text !== ""
+              visible: root.editingId !== "" || root.comboKeys !== "" || phraseField.text !== "" || labelField.text !== "" || root.imageName !== ""
               text: root.editingId !== "" ? "Cancel edit" : "Clear"
               foreground: root.contentMuted
               accent: Color.accent
@@ -601,7 +732,7 @@ FloatingWindow {
         Text {
           width: parent.width - parent.spacing * 2 - ((parent.width * 0.26) + (parent.width * 0.24))
           textFormat: Text.PlainText
-          text: "TEXT"
+          text: "INSERTS"
           color: root.contentMuted
           font.family: root.contentFontFamily
           font.pixelSize: Style.font.caption
@@ -613,7 +744,7 @@ FloatingWindow {
       Text {
         visible: root.macros.length === 0
         width: parent.width
-        text: "Nothing saved yet. Record a combo on the left, type the phrase, save."
+        text: "Nothing saved yet. Record a combo on the left, type the phrase or choose an image, save."
         color: root.contentMuted
         font.family: root.contentFontFamily
         font.pixelSize: Style.font.body
@@ -702,16 +833,36 @@ FloatingWindow {
                 anchors.verticalCenter: parent.verticalCenter
               }
 
-              Text {
+              Row {
                 width: (list.width - Style.space(46)) - (list.width - Style.space(46)) * (0.283 + 0.26)
-                textFormat: Text.PlainText
-                text: String(modelData.text || "")
-                color: root.contentMuted
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.bodySmall
-                elide: Text.ElideRight
-                renderType: Text.NativeRendering
+                spacing: Style.space(6)
                 anchors.verticalCenter: parent.verticalCenter
+
+                Image {
+                  id: rowThumb
+                  visible: modelData.kind === "image"
+                  width: visible ? Style.space(40) : 0
+                  height: Style.space(26)
+                  source: visible ? root.imageUrl(modelData.image) : ""
+                  sourceSize.height: Style.space(52)
+                  fillMode: Image.PreserveAspectFit
+                  asynchronous: true
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Text {
+                  width: parent.width - rowThumb.width - (rowThumb.visible ? parent.spacing : 0)
+                  textFormat: Text.PlainText
+                  text: modelData.kind === "image"
+                    ? "Image · " + String(modelData.mime || "").replace("image/", "").toUpperCase()
+                    : String(modelData.text || "")
+                  color: root.contentMuted
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  elide: Text.ElideRight
+                  renderType: Text.NativeRendering
+                  anchors.verticalCenter: parent.verticalCenter
+                }
               }
             }
           }
@@ -773,6 +924,39 @@ FloatingWindow {
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap
       }
+    }
+  }
+
+  FileDialog {
+    id: imageDialog
+    title: "Omacros — choose an image"
+    nameFilters: Omacros.imageNameFilters
+    onAccepted: root.importImage(selectedFile)
+  }
+
+  // Exit code and stdout can land in either order; finish once both have.
+  property var importExit: null
+  property var importText: null
+
+  function importSettled() {
+    if (importExit === null || importText === null) return
+    var code = importExit
+    var text = importText
+    importExit = null
+    importText = null
+    finishImport(code, text)
+  }
+
+  Process {
+    id: importProc
+    onStarted: { root.importExit = null; root.importText = null }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: { root.importText = String(text || ""); root.importSettled() }
+    }
+    onExited: function(exitCode) {
+      root.importExit = exitCode
+      root.importSettled()
     }
   }
 
