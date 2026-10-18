@@ -23,11 +23,16 @@ FloatingWindow {
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME")
   readonly property string path: Omacros.statePath(home, stateHome)
   readonly property string imagesDir: Omacros.imagesDir(home, stateHome)
-  readonly property color contentForeground: bar ? bar.foreground : Color.popups.text
+  // The window is a popup-style surface, so it pairs popup colors with the
+  // shell font. The inline components below use the same tokens directly
+  // (they can't see this scope).
+  readonly property color contentForeground: Color.popups.text
   readonly property color contentMuted: Qt.darker(contentForeground, 1.4)
-  readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
+  readonly property string contentFontFamily: Style.font.family
   readonly property color surface: Color.popups.background
-  readonly property color separator: Util.alpha(contentForeground, 0.14)
+  readonly property color separator: Util.alpha(contentForeground, 0.1)
+  readonly property color panelBorder: Util.alpha(contentForeground, 0.16)
+  readonly property int pad: Style.space(18)
 
   readonly property bool opened: root.visible
   // First-open size: 60% of the target screen. Binding implicit size lets the
@@ -36,7 +41,7 @@ FloatingWindow {
   // user's own size wins for the rest of the session.
   implicitWidth: Math.round((root.screen ? root.screen.width : 1920) * 0.6)
   implicitHeight: Math.round((root.screen ? root.screen.height : 1080) * 0.6)
-  minimumSize: Qt.size(640, 420)
+  minimumSize: Qt.size(760, 600)
 
   property var macros: []
   property string rawText: ""
@@ -173,7 +178,7 @@ FloatingWindow {
     imageName = formKind === "image" ? String(macro.image || "") : ""
     imageMime = formKind === "image" ? String(macro.mime || "") : ""
     selectMacro(macro.id)
-    setStatus("Editing " + (comboKeys || "macro") + " — change the values and press Update, or Clear to start a new macro", false)
+    setStatus("Editing " + (comboKeys || "macro") + " — change it and press Update macro, or Cancel edit for a new one", false)
   }
 
   function startRecording() {
@@ -400,10 +405,155 @@ FloatingWindow {
     event.accepted = true
   }
 
+  // ---- Building blocks ------------------------------------------------------
+
+  // A bordered card: tinted header strip with a caption, body below.
+  component Card: Rectangle {
+    id: card
+    property string caption: ""
+    property string detail: ""
+    default property alias body: cardBody.data
+    readonly property real headerHeight: cardHeader.height
+    color: Util.alpha(Color.popups.text, 0.035)
+    border.width: 1
+    border.color: Util.alpha(Color.popups.text, 0.16)
+    radius: Style.cornerRadius
+    clip: true
+
+    Rectangle {
+      id: cardHeader
+      width: parent.width
+      height: Style.space(34)
+      color: Util.alpha(Color.popups.text, 0.06)
+
+      Text {
+        textFormat: Text.PlainText
+        anchors.left: parent.left
+        anchors.leftMargin: Style.space(18)
+        anchors.verticalCenter: parent.verticalCenter
+        text: card.caption
+        color: Color.popups.text
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+        font.bold: true
+        font.letterSpacing: 1
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(18)
+        anchors.verticalCenter: parent.verticalCenter
+        text: card.detail
+        color: Qt.darker(Color.popups.text, 1.4)
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+      }
+
+      Rectangle {
+        anchors.bottom: parent.bottom
+        width: parent.width
+        height: 1
+        color: Util.alpha(Color.popups.text, 0.16)
+      }
+    }
+
+    Item {
+      id: cardBody
+      anchors.top: cardHeader.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+    }
+  }
+
+  // Label column + control slot, so every form row lines up on one edge.
+  component FormRow: Item {
+    id: formRow
+    property string label: ""
+    property bool topAligned: false
+    default property alias content: slot.data
+    width: parent ? parent.width : 0
+    height: Math.max(rowLabel.implicitHeight, slot.childrenRect.height)
+
+    Text {
+      id: rowLabel
+      width: Style.space(96)
+      y: formRow.topAligned ? Style.space(8) : (formRow.height - height) / 2
+      textFormat: Text.PlainText
+      text: formRow.label
+      color: Qt.darker(Color.popups.text, 1.4)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.bodySmall
+      font.bold: true
+      horizontalAlignment: Text.AlignRight
+      rightPadding: Style.space(14)
+    }
+
+    Item {
+      id: slot
+      x: Style.space(96)
+      width: formRow.width - Style.space(96)
+      height: childrenRect.height
+    }
+  }
+
+  // One key of a combo, drawn as a keycap.
+  component KeyCap: Rectangle {
+    property string label: ""
+    property bool compact: false
+    width: capText.implicitWidth + Style.space(compact ? 10 : 14)
+    height: capText.implicitHeight + Style.space(compact ? 4 : 6)
+    radius: Style.cornerRadius
+    color: Util.alpha(Color.popups.text, 0.07)
+    border.width: 1
+    border.color: Util.alpha(Color.popups.text, 0.24)
+
+    Text {
+      id: capText
+      anchors.centerIn: parent
+      textFormat: Text.PlainText
+      text: parent.label
+      color: Color.popups.text
+      font.family: Style.font.family
+      font.pixelSize: parent.compact ? Style.font.caption : Style.font.bodySmall
+      font.bold: true
+      renderType: Text.NativeRendering
+    }
+  }
+
+  // Small all-caps pill: macro type in the list, counts in headers.
+  component Badge: Rectangle {
+    property string label: ""
+    property color tint: Color.popups.text
+    width: badgeText.implicitWidth + Style.space(12)
+    height: badgeText.implicitHeight + Style.space(4)
+    radius: Style.cornerRadius
+    color: Util.alpha(tint, 0.12)
+    border.width: 1
+    border.color: Util.alpha(tint, 0.35)
+
+    Text {
+      id: badgeText
+      anchors.centerIn: parent
+      textFormat: Text.PlainText
+      text: parent.label
+      color: parent.tint
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      font.bold: true
+    }
+  }
+
+  function capLabel(token) {
+    var text = String(token || "")
+    return text.length === 1 ? text.toUpperCase() : text
+  }
+
   Item {
     id: content
     anchors.fill: parent
-    anchors.margins: Style.space(16)
+    anchors.margins: root.pad
 
     // Esc here closes the window; anything that wants it (fields, recorder)
     // accepts the event first.
@@ -414,92 +564,88 @@ FloatingWindow {
       event.accepted = true
     }
 
-    Column {
-      id: topColumn
-      anchors.top: parent.top
-      anchors.left: parent.left
-      anchors.right: parent.right
-      spacing: Style.space(10)
+    // ---- Header ------------------------------------------------------------
+    Item {
+      id: header
+      width: parent.width
+      height: Style.space(40)
 
-      Row {
-        width: parent.width
-        spacing: Style.space(8)
+      Rectangle {
+        id: logo
+        width: Style.space(36)
+        height: Style.space(36)
+        anchors.verticalCenter: parent.verticalCenter
+        radius: Style.cornerRadius
+        color: Util.alpha(Color.accent, 0.16)
+        border.width: 1
+        border.color: Util.alpha(Color.accent, 0.5)
+
+        Text {
+          anchors.centerIn: parent
+          textFormat: Text.PlainText
+          text: "󰌌"
+          color: Color.accent
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.iconLarge
+        }
+      }
+
+      Column {
+        anchors.left: logo.right
+        anchors.leftMargin: Style.space(12)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(1)
 
         Text {
           textFormat: Text.PlainText
           text: "Omacros"
           color: root.contentForeground
           font.family: root.contentFontFamily
-          font.pixelSize: Style.font.title
+          font.pixelSize: Style.font.heading
           font.bold: true
-          verticalAlignment: Text.AlignVCenter
         }
 
         Text {
           textFormat: Text.PlainText
-          text: root.macros.length + (root.macros.length === 1 ? " macro" : " macros")
+          text: "Text and image macros · combos wire themselves up"
           color: root.contentMuted
           font.family: root.contentFontFamily
           font.pixelSize: Style.font.caption
-          anchors.verticalCenter: parent.verticalCenter
-        }
-
-        Item { width: 1; height: 1 }
-
-        Rectangle {
-          width: Style.space(28)
-          height: Style.space(28)
-          radius: Math.max(0, Style.cornerRadius - 2)
-          color: closeHover.containsMouse ? Util.alpha(root.contentForeground, 0.12) : "transparent"
-          anchors.verticalCenter: parent.verticalCenter
-
-          HoverHandler { id: closeHover }
-
-          MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.close()
-          }
-
-          Text {
-            textFormat: Text.PlainText
-            anchors.centerIn: parent
-            text: "✕"
-            color: root.contentMuted
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.body
-          }
         }
       }
 
-      Text {
-        visible: root.statusText !== ""
-        width: parent.width
-        text: root.statusText
-        textFormat: Text.PlainText
-        color: root.statusIsError ? Color.urgent : root.contentMuted
-        font.family: root.contentFontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-        renderType: Text.NativeRendering
+      Button {
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        iconText: "✕"
+        tooltipText: "Close (Esc)"
+        bordered: true
+        foreground: root.contentMuted
+        accent: Color.accent
+        fontFamily: root.contentFontFamily
+        onClicked: root.close()
       }
+    }
 
-      Row {
-        width: parent.width
+    // ---- Editor ------------------------------------------------------------
+    Card {
+      id: editor
+      anchors.top: header.bottom
+      anchors.topMargin: Style.space(14)
+      width: parent.width
+      height: headerHeight + form.implicitHeight + root.pad * 2
+      caption: root.editingId !== "" ? "EDITING MACRO" : "NEW MACRO"
+      detail: root.editingId !== "" ? "changes apply to " + root.comboKeys : "record a combo, choose what it inserts, save"
+
+      Column {
+        id: form
+        x: root.pad
+        y: root.pad
+        width: parent.width - root.pad * 2
         spacing: Style.space(12)
 
-        Column {
-          width: parent.width * 0.42
-          spacing: Style.space(8)
-
-          Text {
-            textFormat: Text.PlainText
-            text: root.editingId !== "" ? "Editing macro" : "New macro"
-            color: root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
-            font.bold: true
-          }
+        FormRow {
+          label: "Name"
 
           TextField {
             id: labelField
@@ -507,116 +653,186 @@ FloatingWindow {
             foreground: root.contentForeground
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.body
-            placeholderText: "Name (optional)"
+            placeholderText: "Optional, e.g. Signature"
             onAccepted: {
               if (!root.recording) root.save()
             }
             Keys.onPressed: function(event) { root.fieldEscape(event) }
           }
+        }
+
+        FormRow {
+          label: "Combo"
 
           Row {
-            width: parent.width
             spacing: Style.space(8)
+
+            Rectangle {
+              id: recordChip
+              width: Math.max(Style.space(220), comboCaps.width + Style.space(20))
+              height: recordButton.height
+              radius: Style.cornerRadius
+              color: root.recording ? Util.alpha(Color.urgent, 0.18) : Util.alpha(root.contentForeground, 0.04)
+              border.width: 1
+              border.color: root.recording ? Color.urgent
+                : (activeFocus ? Color.accent : root.panelBorder)
+              activeFocusOnTab: true
+              Keys.onPressed: function(event) { root.recordPressed(event) }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.recording ? root.cancelRecording() : root.startRecording()
+              }
+
+              Row {
+                id: comboCaps
+                visible: !root.recording && root.comboTokens.length > 0
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(4)
+
+                Repeater {
+                  model: root.comboTokens
+
+                  KeyCap {
+                    required property var modelData
+                    label: root.capLabel(modelData)
+                  }
+                }
+              }
+
+              Text {
+                visible: !comboCaps.visible
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: root.recording
+                  ? (root.heldMods !== "" ? root.heldMods + " + …" : "Press the combo now …")
+                  : "Not recorded"
+                color: root.recording ? Color.urgent : root.contentMuted
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.italic: !root.recording
+              }
+            }
 
             Button {
               id: recordButton
-              text: root.recording ? "Cancel" : "Record"
-              foreground: root.contentForeground
+              text: root.recording ? "Cancel" : (root.comboTokens.length > 0 ? "Re-record" : "Record")
+              iconText: root.recording ? "✕" : "●"
+              bordered: true
+              foreground: root.recording ? Color.urgent : root.contentForeground
               accent: Color.accent
               fontFamily: root.contentFontFamily
               onClicked: root.recording ? root.cancelRecording() : root.startRecording()
             }
 
-            Rectangle {
-              id: recordChip
-              width: Math.max(Style.space(40), comboText.implicitWidth + Style.space(16))
-              height: recordButton.implicitHeight
-              radius: Math.max(0, Style.cornerRadius - 2)
-              color: root.recording
-                ? Color.urgent
-                : (root.comboKeys !== "" ? Util.alpha(Color.accent, 0.18) : Util.alpha(root.contentForeground, 0.08))
-              activeFocusOnTab: true
-              Keys.onPressed: function(event) { root.recordPressed(event) }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: "hold modifiers, then tap a key · Esc cancels"
+              color: root.contentMuted
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+        }
 
-              Text {
-                id: comboText
-                textFormat: Text.PlainText
-                anchors.centerIn: parent
-                text: root.recording
-                  ? (root.heldMods !== "" ? root.heldMods + " …" : "Press keys …")
-                  : (root.comboKeys !== "" ? root.comboKeys : "No combo yet")
-                color: root.recording ? Color.background : root.contentForeground
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.bodySmall
-                renderType: Text.NativeRendering
+        FormRow {
+          label: "Inserts"
+
+          // Segmented switch: one bordered strip, two halves.
+          Rectangle {
+            width: kindRow.width + 2
+            height: kindRow.height + 2
+            radius: Style.cornerRadius
+            color: "transparent"
+            border.width: 1
+            border.color: root.panelBorder
+
+            Row {
+              id: kindRow
+              x: 1
+              y: 1
+
+              Button {
+                width: Style.space(96)
+                text: "Text"
+                iconText: "󰊄"
+                selected: root.formKind === "text"
+                foreground: root.contentForeground
+                accent: Color.accent
+                fontFamily: root.contentFontFamily
+                onClicked: root.formKind = "text"
+              }
+
+              Rectangle { width: 1; height: parent.height; color: root.panelBorder }
+
+              Button {
+                width: Style.space(96)
+                text: "Image"
+                iconText: "󰋩"
+                selected: root.formKind === "image"
+                foreground: root.contentForeground
+                accent: Color.accent
+                fontFamily: root.contentFontFamily
+                onClicked: root.formKind = "image"
               }
             }
           }
-          }
+        }
 
-        Column {
-          width: parent.width * 0.56
-          spacing: Style.space(8)
+        FormRow {
+          visible: root.formKind === "text"
+          label: "Text"
 
-          Row {
-            spacing: Style.space(8)
-
-            Text {
-              textFormat: Text.PlainText
-              text: "Insert"
-              color: root.contentForeground
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.bodySmall
-              font.bold: true
-              anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Button {
-              text: "Text"
-              selected: root.formKind === "text"
-              foreground: root.contentForeground
-              accent: Color.accent
-              fontFamily: root.contentFontFamily
-              onClicked: root.formKind = "text"
-            }
-
-            Button {
-              text: "Image"
-              selected: root.formKind === "image"
-              foreground: root.contentForeground
-              accent: Color.accent
-              fontFamily: root.contentFontFamily
-              onClicked: root.formKind = "image"
-            }
-          }
-
-          Row {
-            visible: root.formKind === "image"
+          TextField {
+            id: phraseField
             width: parent.width
-            spacing: Style.space(8)
-
-            Button {
-              id: chooseButton
-              text: root.importing ? "Importing …" : (root.imageName !== "" ? "Replace image…" : "Choose image…")
-              foreground: root.contentForeground
-              accent: Color.accent
-              fontFamily: root.contentFontFamily
-              onClicked: root.chooseImage()
+            foreground: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.body
+            placeholderText: "What the combo pastes, e.g. SUPER DESKTOP"
+            onAccepted: {
+              if (!root.recording) root.save()
             }
+            Keys.onPressed: function(event) { root.fieldEscape(event) }
+          }
+        }
+
+        FormRow {
+          visible: root.formKind === "image"
+          label: "Image"
+          topAligned: true
+
+          Rectangle {
+            width: parent.width
+            height: Style.space(92)
+            radius: Style.cornerRadius
+            color: Util.alpha(root.contentForeground, 0.03)
+            border.width: 1
+            border.color: root.panelBorder
 
             Rectangle {
-              width: Style.space(64)
-              height: Style.space(48)
-              radius: Math.max(0, Style.cornerRadius - 2)
-              color: Util.alpha(root.contentForeground, 0.08)
+              id: previewBox
+              x: Style.space(10)
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(120)
+              height: parent.height - Style.space(20)
+              radius: Style.cornerRadius
+              color: Util.alpha(root.contentForeground, 0.06)
+              border.width: 1
+              border.color: Util.alpha(root.contentForeground, 0.12)
               clip: true
 
               Image {
-                id: formPreview
                 anchors.fill: parent
-                anchors.margins: 2
+                anchors.margins: 3
                 source: root.imageUrl(root.imageName)
-                sourceSize.height: Style.space(96)
+                sourceSize.height: Style.space(144)
                 fillMode: Image.PreserveAspectFit
                 asynchronous: true
                 cache: false
@@ -624,141 +840,244 @@ FloatingWindow {
 
               Text {
                 visible: root.imageName === ""
-                textFormat: Text.PlainText
                 anchors.centerIn: parent
-                text: "none"
-                color: root.contentMuted
+                textFormat: Text.PlainText
+                text: "󰋩"
+                color: Util.alpha(root.contentForeground, 0.3)
                 font.family: root.contentFontFamily
-                font.pixelSize: Style.font.caption
+                font.pixelSize: Style.font.displayLarge
               }
             }
 
-            Text {
-              width: parent.width - chooseButton.width - Style.space(64) - parent.spacing * 2
-              textFormat: Text.PlainText
-              text: root.imageName !== ""
-                ? root.imageMime.replace("image/", "").toUpperCase() + " · the combo pastes it as an image"
-                : "PNG, JPEG, GIF, WebP or BMP"
-              color: root.contentMuted
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
+            Column {
+              anchors.left: previewBox.right
+              anchors.leftMargin: Style.space(14)
+              anchors.right: chooseButton.left
+              anchors.rightMargin: Style.space(14)
               anchors.verticalCenter: parent.verticalCenter
-            }
-          }
+              spacing: Style.space(4)
 
-          TextField {
-            id: phraseField
-            visible: root.formKind === "text"
-            width: parent.width
-            foreground: root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.body
-            placeholderText: "Text to insert, e.g. SUPER DESKTOP"
-            onAccepted: {
-              if (!root.recording) root.save()
-            }
-            Keys.onPressed: function(event) { root.fieldEscape(event) }
-          }
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: root.importing ? "Importing …"
+                  : (root.imageName !== "" ? root.imageMime.replace("image/", "").toUpperCase() + " image ready" : "No image chosen")
+                color: root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+                elide: Text.ElideRight
+              }
 
-          Row {
-            spacing: Style.space(8)
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: root.imageName !== ""
+                  ? "The combo puts it on the clipboard and pastes it into the focused app."
+                  : "PNG, JPEG, GIF, WebP or BMP, up to 20 MB. A copy is kept, so the original can move."
+                color: root.contentMuted
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
+              }
+            }
 
             Button {
-              text: root.editingId !== "" ? "Update macro" : "Save macro"
+              id: chooseButton
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.imageName !== "" ? "Replace…" : "Choose image…"
+              iconText: "󰉋"
+              bordered: true
               foreground: root.contentForeground
               accent: Color.accent
               fontFamily: root.contentFontFamily
-              onClicked: root.save()
+              onClicked: root.chooseImage()
+            }
+          }
+        }
+
+        // Status on the left, actions on the right, one line under the form.
+        FormRow {
+          label: ""
+
+          Item {
+            width: parent.width
+            height: saveButton.height
+
+            Rectangle {
+              visible: root.statusText !== ""
+              anchors.left: parent.left
+              anchors.right: actions.left
+              anchors.rightMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              height: Math.max(saveButton.height, statusLine.implicitHeight + Style.space(8))
+              radius: Style.cornerRadius
+              color: Util.alpha(root.statusIsError ? Color.urgent : Color.accent, 0.1)
+
+              Rectangle {
+                width: 3
+                height: parent.height
+                color: root.statusIsError ? Color.urgent : Color.accent
+              }
+
+              Text {
+                id: statusLine
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(12)
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: root.statusText
+                color: root.statusIsError ? Color.urgent : root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+              }
             }
 
-            Button {
-              visible: root.editingId !== "" || root.comboKeys !== "" || phraseField.text !== "" || labelField.text !== "" || root.imageName !== ""
-              text: root.editingId !== "" ? "Cancel edit" : "Clear"
-              foreground: root.contentMuted
-              accent: Color.accent
-              fontFamily: root.contentFontFamily
-              onClicked: { root.clearForm(); root.setStatus("", false) }
+            Row {
+              id: actions
+              anchors.right: parent.right
+              spacing: Style.space(8)
+
+              Button {
+                visible: root.editingId !== "" || root.comboKeys !== "" || phraseField.text !== "" || labelField.text !== "" || root.imageName !== ""
+                text: root.editingId !== "" ? "Cancel edit" : "Clear"
+                foreground: root.contentMuted
+                accent: Color.accent
+                fontFamily: root.contentFontFamily
+                onClicked: { root.clearForm(); root.setStatus("", false) }
+              }
+
+              Button {
+                id: saveButton
+                text: root.editingId !== "" ? "Update macro" : "Save macro"
+                iconText: "󰆓"
+                bordered: true
+                selected: true
+                foreground: root.contentForeground
+                accent: Color.accent
+                fontFamily: root.contentFontFamily
+                onClicked: root.save()
+              }
             }
           }
         }
       }
-
-      Rectangle {
-        width: parent.width
-        height: 1
-        color: root.separator
-      }
     }
 
-    // Saved macros: a scrollable table with keyboard navigation.
-    Column {
-      id: tableColumn
-      anchors.top: topColumn.bottom
-      anchors.topMargin: Style.space(12)
-      anchors.left: parent.left
-      anchors.right: parent.right
+    // ---- Saved macros --------------------------------------------------------
+    Card {
+      id: library
+      anchors.top: editor.bottom
+      anchors.topMargin: Style.space(14)
       anchors.bottom: footer.top
-      anchors.bottomMargin: Style.space(8)
-      spacing: Style.space(6)
+      anchors.bottomMargin: Style.space(12)
+      width: parent.width
+      caption: "SAVED MACROS · " + root.macros.length
+      detail: "click a row to edit · double-click to insert"
 
-      Row {
+      // Shared column geometry for the head row and every list row.
+      readonly property real rowPad: Style.space(14)
+      readonly property real gap: Style.space(12)
+      readonly property real innerWidth: width - rowPad * 2
+      readonly property real comboWidth: Math.round(innerWidth * 0.28)
+      readonly property real nameWidth: Math.round(innerWidth * 0.18)
+      readonly property real typeWidth: Style.space(64)
+      readonly property real deleteWidth: Style.space(28)
+      readonly property real insertsWidth: innerWidth - comboWidth - nameWidth - typeWidth - deleteWidth - gap * 4
+
+      Rectangle {
         id: tableHead
         width: parent.width
-        spacing: Style.space(8)
+        height: Style.space(28)
+        color: Util.alpha(root.contentForeground, 0.025)
 
-        Text {
-          width: parent.width * 0.26
-          textFormat: Text.PlainText
-          text: "COMBO"
-          color: root.contentMuted
-          font.family: root.contentFontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
-          elide: Text.ElideRight
+        Row {
+          x: library.rowPad
+          height: parent.height
+          spacing: library.gap
+
+          Repeater {
+            model: [
+              { title: "COMBO", width: library.comboWidth },
+              { title: "NAME", width: library.nameWidth },
+              { title: "TYPE", width: library.typeWidth },
+              { title: "INSERTS", width: library.insertsWidth }
+            ]
+
+            Text {
+              required property var modelData
+              width: modelData.width
+              height: parent.height
+              verticalAlignment: Text.AlignVCenter
+              textFormat: Text.PlainText
+              text: modelData.title
+              color: root.contentMuted
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              font.letterSpacing: 1
+            }
+          }
         }
 
-        Text {
-          width: parent.width * 0.24
-          textFormat: Text.PlainText
-          text: "NAME"
-          color: root.contentMuted
-          font.family: root.contentFontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
-          elide: Text.ElideRight
-        }
-
-        Text {
-          width: parent.width - parent.spacing * 2 - ((parent.width * 0.26) + (parent.width * 0.24))
-          textFormat: Text.PlainText
-          text: "INSERTS"
-          color: root.contentMuted
-          font.family: root.contentFontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
-          elide: Text.ElideRight
+        Rectangle {
+          anchors.bottom: parent.bottom
+          width: parent.width
+          height: 1
+          color: root.separator
         }
       }
 
-      Text {
+      Column {
         visible: root.macros.length === 0
-        width: parent.width
-        text: "Nothing saved yet. Record a combo on the left, type the phrase or choose an image, save."
-        color: root.contentMuted
-        font.family: root.contentFontFamily
-        font.pixelSize: Style.font.body
-        wrapMode: Text.WordWrap
+        anchors.centerIn: list
+        spacing: Style.space(6)
+
+        Text {
+          anchors.horizontalCenter: parent.horizontalCenter
+          textFormat: Text.PlainText
+          text: "󰌌"
+          color: Util.alpha(root.contentForeground, 0.25)
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.displayLarge
+        }
+
+        Text {
+          anchors.horizontalCenter: parent.horizontalCenter
+          textFormat: Text.PlainText
+          text: "No macros yet"
+          color: root.contentForeground
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.body
+          font.bold: true
+        }
+
+        Text {
+          anchors.horizontalCenter: parent.horizontalCenter
+          textFormat: Text.PlainText
+          text: "Record a combo above, type a phrase or choose an image, then save."
+          color: root.contentMuted
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.caption
+        }
       }
 
       ListView {
         id: list
-        width: parent.width
-        height: parent.height - tableHead.height - parent.spacing
+        anchors.top: tableHead.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         model: root.macros
-        spacing: Style.space(2)
         interactive: true
         pixelAligned: true
         maximumFlickVelocity: 1500
@@ -767,131 +1086,144 @@ FloatingWindow {
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
         delegate: Rectangle {
+          id: row
           required property var modelData
           required property int index
+          readonly property bool current: list.currentIndex === index
+          readonly property bool isImage: modelData.kind === "image"
           width: list.width
-          height: Math.max(Style.space(36), rowColumn.implicitHeight + Style.space(10))
-          radius: Math.max(0, Style.cornerRadius - 2)
-          color: list.currentIndex === index
-            ? Util.alpha(root.contentForeground, 0.09)
-            : (rowHover.hovered ? Util.alpha(root.contentForeground, 0.05) : "transparent")
-
-          Rectangle {
-            visible: list.currentIndex === index
-            width: 3
-            height: parent.height
-            radius: 1.5
-            color: Color.accent
-            anchors.left: parent.left
-            anchors.leftMargin: -Style.space(6)
-          }
+          height: Style.space(isImage ? 52 : 44)
+          color: current
+            ? Util.alpha(Color.accent, 0.1)
+            : (rowHover.hovered ? Util.alpha(root.contentForeground, 0.04) : "transparent")
 
           HoverHandler { id: rowHover }
 
           MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
-            onClicked: { root.populateFrom(modelData); list.forceActiveFocus() }
+            onClicked: { root.populateFrom(row.modelData); list.forceActiveFocus() }
             onDoubleClicked: root.runSelected()
           }
 
-          Column {
-            id: rowColumn
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.leftMargin: Style.space(10)
-            anchors.rightMargin: Style.space(10)
-            spacing: Style.space(2)
+          Rectangle {
+            visible: row.current
+            width: 3
+            height: parent.height
+            color: Color.accent
+          }
 
-            Row {
-              width: parent.width
-              spacing: Style.space(8)
+          Row {
+            x: library.rowPad
+            height: parent.height
+            spacing: library.gap
 
-              Text {
-                width: (list.width - Style.space(46)) * 0.283
-                textFormat: Text.PlainText
-                text: String(modelData.keys || "")
-                color: root.contentForeground
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-                elide: Text.ElideRight
-                renderType: Text.NativeRendering
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              Text {
-                width: (list.width - Style.space(46)) * 0.26
-                textFormat: Text.PlainText
-                text: String(modelData.label || "")
-                color: root.contentMuted
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.caption
-                elide: Text.ElideRight
-                renderType: Text.NativeRendering
-                anchors.verticalCenter: parent.verticalCenter
-              }
+            Item {
+              width: library.comboWidth
+              height: parent.height
+              clip: true
 
               Row {
-                width: (list.width - Style.space(46)) - (list.width - Style.space(46)) * (0.283 + 0.26)
-                spacing: Style.space(6)
                 anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(4)
 
-                Image {
-                  id: rowThumb
-                  visible: modelData.kind === "image"
-                  width: visible ? Style.space(40) : 0
-                  height: Style.space(26)
-                  source: visible ? root.imageUrl(modelData.image) : ""
-                  sourceSize.height: Style.space(52)
-                  fillMode: Image.PreserveAspectFit
-                  asynchronous: true
-                  anchors.verticalCenter: parent.verticalCenter
-                }
+                Repeater {
+                  model: row.modelData.tokens || []
 
-                Text {
-                  width: parent.width - rowThumb.width - (rowThumb.visible ? parent.spacing : 0)
-                  textFormat: Text.PlainText
-                  text: modelData.kind === "image"
-                    ? "Image · " + String(modelData.mime || "").replace("image/", "").toUpperCase()
-                    : String(modelData.text || "")
-                  color: root.contentMuted
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  elide: Text.ElideRight
-                  renderType: Text.NativeRendering
-                  anchors.verticalCenter: parent.verticalCenter
+                  KeyCap {
+                    required property var modelData
+                    compact: true
+                    label: root.capLabel(modelData)
+                  }
                 }
               }
+            }
+
+            Text {
+              width: library.nameWidth
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: String(row.modelData.label || "") || "—"
+              color: row.modelData.label ? root.contentForeground : root.contentMuted
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+              renderType: Text.NativeRendering
+            }
+
+            Item {
+              width: library.typeWidth
+              height: parent.height
+
+              Badge {
+                anchors.verticalCenter: parent.verticalCenter
+                label: row.isImage ? "IMAGE" : "TEXT"
+                tint: row.isImage ? Color.accent : root.contentMuted
+              }
+            }
+
+            Item {
+              width: library.insertsWidth
+              height: parent.height
+
+              Rectangle {
+                id: thumbFrame
+                visible: row.isImage
+                width: visible ? Style.space(56) : 0
+                height: Style.space(38)
+                anchors.verticalCenter: parent.verticalCenter
+                radius: Style.cornerRadius
+                color: Util.alpha(root.contentForeground, 0.06)
+                border.width: 1
+                border.color: Util.alpha(root.contentForeground, 0.14)
+                clip: true
+
+                Image {
+                  anchors.fill: parent
+                  anchors.margins: 2
+                  source: row.isImage ? root.imageUrl(row.modelData.image) : ""
+                  sourceSize.height: Style.space(76)
+                  fillMode: Image.PreserveAspectFit
+                  asynchronous: true
+                }
+              }
+
+              Text {
+                anchors.left: thumbFrame.right
+                anchors.leftMargin: row.isImage ? Style.space(10) : 0
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: row.isImage
+                  ? String(row.modelData.mime || "").replace("image/", "").toUpperCase() + " image"
+                  : String(row.modelData.text || "")
+                color: row.isImage ? root.contentMuted : root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+                renderType: Text.NativeRendering
+              }
+            }
+
+            Button {
+              width: library.deleteWidth
+              anchors.verticalCenter: parent.verticalCenter
+              opacity: row.current || rowHover.hovered ? 1 : 0
+              iconText: "✕"
+              tooltipText: "Delete (Del)"
+              foreground: root.contentMuted
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              onClicked: root.deleteMacro(row.modelData.id)
             }
           }
 
           Rectangle {
-            width: Style.space(24)
-            height: Style.space(24)
-            radius: Math.max(0, Style.cornerRadius - 2)
-            color: deleteRowHover.containsMouse ? Util.alpha(root.contentForeground, 0.12) : "transparent"
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.rightMargin: Style.space(4)
-
-            HoverHandler { id: deleteRowHover }
-
-            MouseArea {
-              anchors.fill: parent
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.deleteMacro(modelData.id)
-            }
-
-            Text {
-              textFormat: Text.PlainText
-              anchors.centerIn: parent
-              text: "✕"
-              color: root.contentMuted
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.body
-            }
+            anchors.bottom: parent.bottom
+            x: library.rowPad
+            width: parent.width - library.rowPad * 2
+            height: 1
+            color: root.separator
           }
         }
 
@@ -909,20 +1241,38 @@ FloatingWindow {
       }
     }
 
-    Column {
+    // ---- Key hints -----------------------------------------------------------
+    Row {
       id: footer
       anchors.bottom: parent.bottom
-      anchors.left: parent.left
-      anchors.right: parent.right
+      spacing: Style.space(16)
 
-      Text {
-        width: parent.width
-        textFormat: Text.PlainText
-        text: "click a row to edit · double-click inserts · ↑ ↓ select · Enter insert · Del remove · Esc close/cancel"
-        color: root.contentMuted
-        font.family: root.contentFontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
+      Repeater {
+        model: [
+          { keys: "↑ ↓", what: "select" },
+          { keys: "Enter", what: "insert" },
+          { keys: "Del", what: "remove" },
+          { keys: "Esc", what: "close / cancel" }
+        ]
+
+        Row {
+          required property var modelData
+          spacing: Style.space(6)
+
+          KeyCap {
+            compact: true
+            label: parent.modelData.keys
+          }
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: parent.modelData.what
+            color: root.contentMuted
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
       }
     }
   }
