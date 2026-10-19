@@ -168,6 +168,10 @@ FloatingWindow {
   // become editable, Save turns into Update. The list selection follows.
   function populateFrom(macro) {
     if (!macro) return
+    // Delegate modelData can wrap tokens as a QML model instead of a JS
+    // array. Load the original state entry so saving keeps a valid combo.
+    macro = Omacros.findMacro(root.macros, macro.id)
+    if (!macro) return
     if (recording) cancelRecording()
     editingId = macro.id
     comboTokens = macro.tokens || []

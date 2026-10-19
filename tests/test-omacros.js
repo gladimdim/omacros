@@ -434,6 +434,36 @@ var os = require("os")
 var path = require("path")
 var childProcess = require("child_process")
 
+test("editor preserves a saved shortcut when QML wraps delegate tokens", function() {
+  var added = Om.addMacro("", { tokens: ["SUPER", "F2"], label: "Original", text: "original" })
+  var context = {
+    Omacros: Om,
+    root: { macros: added.state.macros },
+    recording: false,
+    labelField: {},
+    phraseField: {},
+    selectMacro: function() {},
+    setStatus: function() {}
+  }
+  // Exercise the actual form loader with the non-array token model QML
+  // exposes through delegate modelData, rather than bypassing the UI.
+  var source = fs.readFileSync(path.join(__dirname, "../MacrosWindow.qml"), "utf8")
+  var populate = source.match(/^  function populateFrom\(macro\) \{[\s\S]*?^  \}/m)
+  assert.ok(populate, "editor form loader exists")
+  var load = require("vm").runInNewContext("(" + populate[0] + ")", context)
+  load({ id: added.macro.id, keys: added.macro.keys, tokens: { count: 2, get: function(i) { return { modelData: added.macro.tokens[i] } } } })
+
+  eq(context.comboTokens, ["SUPER", "F2"])
+  eq(context.labelField.text, "Original")
+  eq(context.phraseField.text, "original")
+  var updated = Om.updateMacro(Om.encode(added.state), context.editingId, {
+    tokens: context.comboTokens, label: "Renamed", text: "edited"
+  })
+  eq(updated.ok, true)
+  eq(updated.macro.keys, "SUPER + F2")
+  eq(updated.macro.text, "edited")
+})
+
 function runArgv(argv) {
   var r = childProcess.spawnSync(argv[0], argv.slice(1), { encoding: "utf8" })
   return { code: r.status, stdout: r.stdout }
